@@ -124,23 +124,31 @@ class Wayfinder:
         def note(entry):
             if len(errors) < MAX_ERRORS:
                 errors.append(entry)
-        def walk_error(error):
-            note({'code': 'walk_error', 'detail': type(error).__name__})
-        for root, dirs, files in os.walk(self.vault, followlinks=False, onerror=walk_error):
-            dirs[:] = sorted(d for d in dirs if not d.startswith('.') and not (Path(root) / d).is_symlink())
-            # Directories cost a visit too: otherwise a huge tree is walked for free.
-            count += len(dirs)
-            if count > self.settings.max_files:
-                limited = True
-                break
-            for name in sorted(files):
-                if not name.endswith('.md') or name.startswith('.') or (Path(root) / name).is_symlink():
-                    continue
+        # A manual stack over scandir: os.walk materialises a whole directory before any budget
+        # check, so a wide tree could still be walked for free.
+        stack = [self.vault]
+        while stack and not limited:
+            root = stack.pop()
+            try:
+                with os.scandir(root) as listing:
+                    entries = sorted(listing, key=lambda entry: entry.name)
+            except OSError as exc:
+                note({'code': 'walk_error', 'detail': type(exc).__name__})
+                continue
+            descend = []
+            for entry in entries:
                 if count >= self.settings.max_files:
                     limited = True
                     break
                 count += 1
-                rel = (Path(root) / name).relative_to(self.vault).as_posix()
+                if entry.name.startswith('.'):
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    descend.append(Path(entry.path))
+                    continue
+                if not entry.name.endswith('.md') or entry.is_symlink():
+                    continue
+                rel = (Path(root) / entry.name).relative_to(self.vault).as_posix()
                 try:
                     text = self._read(rel)
                 except (OSError, ValueError, UnicodeError) as exc:
@@ -155,8 +163,7 @@ class Wayfinder:
                                  'backend': 'markdown', 'tier': self.tier(rel), 'tier_rule': 'configured_roots',
                                  'score': sum(text.casefold().count(t) for t in terms),
                                  'provenance': [{'backend': 'markdown', 'citation': citation}]})
-            if limited:
-                break
+            stack.extend(reversed(descend))
         status = {'status': 'degraded' if errors or limited else 'ok', 'errors': errors}
         if limited:
             status['code'] = 'scan_limit'
@@ -204,9 +211,12 @@ class Wayfinder:
                 if parsed.query not in ('', 'index=wayfinder') or parsed.fragment:
                     raise ValueError('unexpected QMD index or fragment')
                 relative = unquote(parsed.path.removeprefix('/'))
+                # Validate on both branches: an unread hit still needs a trustworthy path.
+                relative_path(relative, markdown=True)
                 if qmd_resolved < budget:
-                    rows.append(self._canonical(relative, 'qmd', {'backend': 'qmd', 'citation': uri}, terms))
+                    # A slot is consumed even if the read then fails, so failures are not free.
                     qmd_resolved += 1
+                    rows.append(self._canonical(relative, 'qmd', {'backend': 'qmd', 'citation': uri}, terms))
                     resolved += 1
                 else:
                     # Unread, but still a real hit with real provenance and its own tier.
@@ -222,15 +232,19 @@ class Wayfinder:
         for row in memories:
             canonical = row.pop('canonical_note')
             if canonical:
-                if memory_resolved < budget:
-                    try:
-                        row = self._canonical(canonical, 'mnemosyne', row['provenance'][0], terms)
+                try:
+                    relative_path(canonical, markdown=True)
+                    # The tier comes from the canonical path even when the read is skipped.
+                    row['tier'] = self.tier(canonical)
+                    if memory_resolved < budget:
                         memory_resolved += 1
+                        row = self._canonical(canonical, 'mnemosyne', row['provenance'][0], terms)
                         resolved += 1
-                    except (ValueError, TypeError, OSError, UnicodeError):
-                        row['canonical_note_status'] = 'invalid_or_missing'
-                else:
-                    row['canonical_note_status'] = 'not_resolved'
+                    else:
+                        row['canonical_note_status'] = 'not_resolved'
+                except (ValueError, TypeError, OSError, UnicodeError):
+                    row['canonical_note_status'] = 'invalid_or_missing'
+                    row['tier'] = 'episodic'
             rows.append(row)
         merged = {}
         for row in rows:

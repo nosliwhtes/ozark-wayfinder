@@ -284,6 +284,69 @@ class RecallTests(unittest.TestCase):
         self.assertNotIn('canonical_note_status', memory[0])
         self.assertEqual(reply['resolution'], {'budget': 16, 'resolved': 17})
 
+    def test_unresolved_memory_hit_keeps_its_canonical_tier(self):
+        """A skipped read must not demote a linked note to the generic episodic tier."""
+        import sqlite3
+        for name in ('imports', 'notes'):
+            (self.vault / name).mkdir()
+        for index in range(8):
+            (self.vault / f'imports/i{index}.md').write_text('solar note')
+        (self.vault / 'notes/n.md').write_text('solar note')
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
+            rows = [(f'i{index}', '{"vault_note": "imports/i%d.md"}' % index) for index in range(8)]
+            rows.append(('c1', '{"vault_note": "notes/n.md"}'))
+            conn.executemany("INSERT INTO working_memory VALUES (?, 'solar', 'x', ?, 'global', 's', NULL, NULL)", rows)
+            conn.commit()
+        # limit=4 gives a budget of 8, so the ninth link is over budget and never read.
+        results = self.service(mnemosyne_db=database).recall('solar', 4)['results']
+        row = next(r for r in results if r['citation'] == 'mnemosyne:working_memory:c1')
+        self.assertEqual(row['tier'], 'unclassified')
+        self.assertEqual(row['canonical_note_status'], 'not_resolved')
+
+    def test_unresolved_qmd_path_is_still_validated(self):
+        import sys
+        (self.vault / 'curated').mkdir()
+        (self.vault / 'curated/a.md').write_text('solar note')
+        workspace = self.root / 'qmd'
+        (workspace / 'config').mkdir(parents=True)
+        (workspace / 'index.sqlite3').touch()
+        (workspace / 'config/wayfinder.yml').write_text('collections: {}')
+        script = self.root / 'fake_qmd.py'
+        hits = [{'file': 'qmd://vault/curated/a.md'}, {'file': 'qmd://vault/curated/b.md'},
+                {'file': 'qmd://vault/curated/../../escape.md'}]
+        script.write_text('import json\nprint(json.dumps(%r))\n' % (hits,))
+        (self.vault / 'curated/b.md').write_text('solar note')
+        reply = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script))).recall('solar', 1)
+        # Budget is 2, so the bad third hit is never read — rejection must still happen.
+        self.assertEqual(reply['backends']['qmd']['code'], 'invalid_result')
+
+    def test_scan_cap_reports_truncation_instead_of_ok(self):
+        import sqlite3
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
+            conn.executemany("INSERT INTO working_memory VALUES (?, 'solar', 'x', '{}', 'global', 's', NULL, '2000-01-01')",
+                             [(f'old-{i}',) for i in range(5001)])
+            conn.commit()
+        reply = self.service(mnemosyne_db=database).recall('solar')
+        self.assertEqual(reply['backends']['mnemosyne']['code'], 'scan_limit')
+        self.assertTrue(reply['degraded'])
+
+    def test_stop_survives_a_kill_that_raises(self):
+        import importlib
+        backends = importlib.import_module('backends')
+
+        class Fixture:
+            def kill(self):
+                raise OSError('no such process')
+
+            def wait(self):
+                raise OSError('no such process')
+
+        self.assertIsNone(backends._stop(Fixture()))
+
     def test_row_cap_still_applies_to_live_rows(self):
         import sqlite3
         database = self.root / 'memory.sqlite3'

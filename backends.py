@@ -52,6 +52,7 @@ def _live_rows(conn, sql, params):
     """Page through matches so a heap of expired rows cannot hide the ones after it.
 
     Faces a hard read cap as well, so an archive of expired matches is still bounded.
+    Returns the live rows and whether the cap cut the scan short.
     """
     live, scanned = [], 0
     offset = 0
@@ -64,7 +65,22 @@ def _live_rows(conn, sql, params):
         live.extend(row for row in page if not expired(row['valid_until']))
         if len(page) < PAGE_ROWS:
             break
-    return live
+    if scanned >= SCAN_ROWS:
+        more = list(conn.execute(sql, (*params, scanned)))
+        return live, bool(more)
+    return live, False
+
+
+def _stop(process):
+    """Reap a child without letting a failing kill mask the reason we stopped."""
+    try:
+        process.kill()
+    except OSError:
+        pass
+    try:
+        process.wait()
+    except OSError:
+        pass
 
 
 def _run_bounded(command, cwd, env, timeout, limit):
@@ -81,15 +97,13 @@ def _run_bounded(command, cwd, env, timeout, limit):
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    process.kill()
-                    process.wait()
+                    _stop(process)
                     return None, True, False, b""
                 try:
                     code = process.wait(timeout=min(0.05, remaining))
                 except subprocess.TimeoutExpired:
                     if output.tell() > limit or errors.tell() > limit:
-                        process.kill()
-                        process.wait()
+                        _stop(process)
                         return None, False, True, b""
                     continue
                 # A child that finished after the deadline still overran the bound.
@@ -101,9 +115,11 @@ def _run_bounded(command, cwd, env, timeout, limit):
             output.seek(0)
             return code, False, False, output.read()
         finally:
-            if process.poll() is None:
-                process.kill()
-                process.wait()
+            try:
+                if process.poll() is None:
+                    _stop(process)
+            except OSError:
+                pass
 
 
 def qmd_environment(workspace: Path) -> dict[str, str]:
@@ -155,6 +171,7 @@ def mnemosyne_search(settings, terms):
     if path.is_symlink():
         return failure('symlink_state')
     rows = []
+    truncated = False
     try:
         with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=1)) as conn:
             conn.row_factory = sqlite3.Row
@@ -179,9 +196,11 @@ def mnemosyne_search(settings, terms):
                 # Expiry is filtered in Python, so the row cap has to be applied after it.
                 sql = f"SELECT id, content, source, metadata_json, valid_until FROM {table} WHERE scope = 'global' AND superseded_by IS NULL AND (" + ' OR '.join(clauses) + f') LIMIT {PAGE_ROWS} OFFSET ?'
                 try:
-                    live = _live_rows(conn, sql, params)
+                    live, cut_short = _live_rows(conn, sql, params)
                 except ValueError:
                     return failure('invalid_expiry')
+                if cut_short:
+                    truncated = True
                 if len(live) > ROW_LIMIT:
                     return failure('result_limit')
                 for row in live:
@@ -196,6 +215,10 @@ def mnemosyne_search(settings, terms):
                                  'provenance': [{'backend': 'mnemosyne', 'citation': citation}]})
             if not usable:
                 return failure('unsupported_schema')
+        if truncated:
+            # Rows are still usable, but the scan stopped early: say so instead of "ok".
+            return rows, {'status': 'degraded', 'code': 'scan_limit',
+                          'mode': 'readonly_sqlite_global_literal'}
         return rows, {'status': 'ok', 'mode': 'readonly_sqlite_global_literal'}
     except sqlite3.OperationalError:
         return failure('database_busy_invalid_or_query_budget')

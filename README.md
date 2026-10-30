@@ -52,7 +52,7 @@ Settings live under `plugins.entries.ozark-wayfinder.settings`.
 | `vault_root` | — | Required existing absolute vault directory |
 | `curated_roots` | `["curated"]` | Relative prefixes sorted first |
 | `imported_roots` | `["imports", "sources"]` | Relative prefixes sorted last; must not overlap curated |
-| `max_files` | `5000` | Visited directories plus candidate notes; other file types are free |
+| `max_files` | `5000` | Directory entries visited before the walk stops |
 | `max_file_bytes` | `1048576` | Per-file read and write limit |
 | `mnemosyne_db` | off | Absolute SQLite path, opened `mode=ro` with `query_only` |
 | `qmd_workspace` | off | Absolute dedicated QMD workspace |
@@ -85,16 +85,16 @@ unlinked memory hit, so a stale path can never force a foreign read.
 Run from the project root, with the host interpreter for the host test:
 
 ```sh
-python -m unittest discover -s tests -v   # 30 tests, 0 failures
+python -m unittest discover -s tests -v   # 34 tests, 0 failures
 python tools/verify_host.py               # official doctor: 3 tools, 0 hooks
-python tools/verify_bootstrap.py          # clean-venv wheel install: 27 passed, 3 expected skips
+python tools/verify_bootstrap.py          # clean-venv wheel install: 31 passed, 3 expected skips
 ```
 
-- Default suite: **28 pass, 2 optional skips**. The suite includes a real `PluginManager`
+- Default suite: **32 pass, 2 optional skips**. The suite includes a real `PluginManager`
   discovery, scoped dispatch, checkpoint readback and unload in an isolated `HOME`/`HERMES_HOME`
   — no mocked plugin context.
 - `RUN_QMD_INTEGRATION=1 MNEMOSYNE_PYTHON=<interpreter-with-mnemosyne>` against a real QMD
-  binary and a real Mnemosyne database: **30/30, no skips**, all on synthetic data.
+  binary and a real Mnemosyne database: **34/34, no skips**, all on synthetic data.
 - Clean bootstrap builds and installs the wheel in a fresh venv with declared dependencies only.
 
 Both verification scripts stay inside the project and never enable the live profile.
