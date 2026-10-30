@@ -255,8 +255,10 @@ class Wayfinder:
                             row['source_label'] = label
                         resolved += 1
                     else:
+                        row['canonical_note'] = canonical
                         row['canonical_note_status'] = 'not_resolved'
                 except (ValueError, TypeError, OSError, UnicodeError):
+                    row['canonical_note'] = canonical
                     row['canonical_note_status'] = 'invalid_or_missing'
                     row['tier'] = 'episodic'
             rows.append(row)
@@ -268,6 +270,10 @@ class Wayfinder:
                 # Keep a label from any surviving backend record; the first row may be Markdown.
                 if row.get('source_label') and not merged[key].get('source_label'):
                     merged[key]['source_label'] = row['source_label']
+                if row.get('source_label'):
+                    labels = merged[key].setdefault('source_labels', [])
+                    if row['source_label'] not in labels:
+                        labels.append(row['source_label'])
             else:
                 merged[key] = row
         rows = list(merged.values())

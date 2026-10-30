@@ -15,8 +15,8 @@ SCAN_ROWS = 5000
 PAGE_ROWS = 200
 
 
-def failure(code):
-    return [], {'status': 'error', 'code': code}
+def failure(code, **extra):
+    return [], {'status': 'error', 'code': code, **extra}
 
 
 def expired(value) -> bool:
@@ -88,7 +88,8 @@ def _run_bounded(command, cwd, env, timeout, limit):
     """Run without a shell, killing the child if it outruns either bound.
 
     Output goes to temp files, so disk use is capped by polling rather than by RAM.
-    Returns (returncode | None, timed_out, over_limit, stdout_bytes).
+    Returns (returncode | None, timed_out, over_limit, stdout_bytes, reaped).
+    ``reaped`` is False only when the child could not be confirmed gone.
     """
     with tempfile.TemporaryFile(dir=cwd) as output, tempfile.TemporaryFile(dir=cwd) as errors:
         process = subprocess.Popen(command, cwd=cwd, env=env, stdout=output, stderr=errors,
@@ -98,10 +99,17 @@ def _run_bounded(command, cwd, env, timeout, limit):
         try:
             # Inside the try, so a failure here cannot strand the child we just launched.
             deadline = time.monotonic() + timeout
-            cleanup_deadline = max(deadline, time.monotonic()) + 5
             def cleanup_budget():
-                return max(0.001, cleanup_deadline - time.monotonic())
+                return max(0.001, (cleanup_deadline or 0.0) - time.monotonic())
             def settle():
+                # Cleanup gets its own 5s window from the moment it starts, not from the
+                # execution deadline, so an early overflow does not wait out the timeout too.
+                nonlocal cleanup_deadline
+                if cleanup_deadline is None:
+                    try:
+                        cleanup_deadline = time.monotonic() + 5
+                    except RuntimeError:
+                        return _stop(process, 5)
                 try:
                     return _stop(process, cleanup_budget())
                 except OSError:
@@ -110,30 +118,36 @@ def _run_bounded(command, cwd, env, timeout, limit):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     stopped = settle()
-                    return None, True, False, b""
+                    return None, True, False, b"", stopped
                 try:
                     code = process.wait(timeout=min(0.05, remaining))
                 except subprocess.TimeoutExpired:
                     if output.tell() > limit or errors.tell() > limit:
                         stopped = settle()
-                        return None, False, True, b""
+                        return None, False, True, b"", stopped
                     continue
                 # A child that finished after the deadline still overran the bound.
                 if time.monotonic() > deadline:
-                    return None, True, False, b""
+                    return None, True, False, b"", True
                 break
             if output.tell() > limit or errors.tell() > limit:
-                return code, False, True, b""
+                return code, False, True, b"", True
             output.seek(0)
-            return code, False, False, output.read()
+            return code, False, False, output.read(), True
         finally:
             # Retry only if the earlier attempt could not confirm the child was gone. Both
-            # attempts share one deadline, so they cannot stack into two timeouts.
+            # attempts share one deadline, so they cannot stack into two timeouts, and a clock
+            # failure here must not skip reaping altogether.
             if not stopped and process.poll() is None:
                 try:
-                    _stop(process, 5.0 if cleanup_deadline is None else
-                          max(0.001, cleanup_deadline - time.monotonic()))
-                except OSError:
+                    budget = 5.0
+                    if cleanup_deadline is not None:
+                        try:
+                            budget = max(0.001, cleanup_deadline - time.monotonic())
+                        except RuntimeError:
+                            pass
+                    _stop(process, budget)
+                except (OSError, RuntimeError):
                     pass
 
 
@@ -158,12 +172,13 @@ def qmd_search(settings, query):
     command = list(settings.qmd_command) + ['--index', 'wayfinder', 'search', query, '-c', 'vault', '--json', '-n', '50']
     try:
         # QMD is a user-chosen trusted local executable; both streams are bounded while running.
-        code, timed_out, over_limit, raw = _run_bounded(command, root, qmd_environment(root),
-                                                        settings.qmd_timeout, OUTPUT_LIMIT)
+        code, timed_out, over_limit, raw, reaped = _run_bounded(
+            command, root, qmd_environment(root), settings.qmd_timeout, OUTPUT_LIMIT)
+        child = 'reaped' if reaped else 'alive'
         if over_limit:
-            return failure('output_limit')
+            return failure('output_limit', child=child)
         if timed_out:
-            return failure('timeout')
+            return failure('timeout', child=child)
         if code:
             return failure('process_failed')
         data = json.loads(raw)

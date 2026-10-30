@@ -304,6 +304,22 @@ class RecallTests(unittest.TestCase):
         row = next(r for r in results if r['citation'] == 'mnemosyne:working_memory:c1')
         self.assertEqual(row['tier'], 'unclassified')
         self.assertEqual(row['canonical_note_status'], 'not_resolved')
+        # The unresolved record must still say where it points.
+        self.assertEqual(row['canonical_note'], 'notes/n.md')
+
+    def test_labels_from_every_merged_record_are_kept(self):
+        import sqlite3
+        (self.vault / 'curated').mkdir()
+        (self.vault / 'curated/c.md').write_text('solar note')
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
+            conn.executemany("INSERT INTO working_memory VALUES (?, 'solar', ?, '{\"vault_note\":\"curated/c.md\"}', 'global', 's', NULL, NULL)",
+                             [('a', 'checkpoint'), ('b', 'conversation')])
+            conn.commit()
+        results = self.service(mnemosyne_db=database).recall('solar')['results']
+        row = next(r for r in results if r['path'] == 'curated/c.md')
+        self.assertEqual(row['source_labels'], ['checkpoint', 'conversation'])
 
     def test_resolved_memory_hit_keeps_its_source_label(self):
         import sqlite3
@@ -501,6 +517,39 @@ class RecallTests(unittest.TestCase):
         # The reason we stopped survives a failed kill, and only one 5s wait is attempted.
         self.assertEqual(reply['backends']['qmd']['code'], 'timeout')
         self.assertLessEqual(len(calls), 2)
+        # And the caller is told the child could not be confirmed gone.
+        self.assertEqual(reply['backends']['qmd']['child'], 'alive')
+
+    def test_overflow_cleanup_uses_its_own_window(self):
+        """An early overflow must not also wait out the execution timeout."""
+        import sys, importlib, time
+        from unittest.mock import patch
+        backends = importlib.import_module('backends')
+        (self.vault / 'a.md').write_text('solar')
+        workspace = self.root / 'qmd'
+        (workspace / 'config').mkdir(parents=True)
+        (workspace / 'index.sqlite3').touch()
+        (workspace / 'config/wayfinder.yml').write_text('collections: {}')
+        script = self.root / 'fake_qmd.py'
+        script.write_text('import sys, time\nsys.stdout.write("x" * 2200000)\nsys.stdout.flush()\ntime.sleep(12)\n')
+        calls = []
+
+        def slow_failure(process, budget):
+            calls.append(budget)
+            time.sleep(min(budget, 5))
+            raise OSError('kill refused')
+
+        service = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script)), qmd_timeout=8)
+        started = time.monotonic()
+        with patch.object(backends, '_stop', slow_failure):
+            try:
+                reply = service.recall('solar')
+            finally:
+                pass
+        elapsed = time.monotonic() - started
+        self.assertEqual(reply['backends']['qmd']['code'], 'output_limit')
+        # A shared deadline anchored at the execution timeout would take about 10s here.
+        self.assertLess(elapsed, 7)
 
     def test_row_cap_still_applies_to_live_rows(self):
         import sqlite3
