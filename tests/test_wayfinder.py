@@ -688,6 +688,35 @@ class RecallTests(unittest.TestCase):
         self.assertTrue(result[1], 'should have reported a timeout')
         self.assertTrue(outcome['reaped'], 'the poll confirmed it had exited')
 
+    def test_a_child_that_exits_during_the_second_attempt_is_not_called_alive(self):
+        """The same race, one attempt later: both kills fail and the child still exits."""
+        import sys, importlib, tempfile
+        from unittest.mock import patch
+        backends = importlib.import_module('backends')
+        real_monotonic = backends.time.monotonic
+        start = real_monotonic()
+        calls = {'n': 0, 'stops': 0}
+
+        def clock():
+            calls['n'] += 1
+            return start if calls['n'] == 1 else start + 1000
+
+        def failing(process, budget):
+            calls['stops'] += 1
+            if calls['stops'] == 2:
+                process.wait(timeout=5)  # it finishes while the second attempt is failing
+            raise OSError('kill refused')
+
+        with tempfile.TemporaryDirectory(dir=self.root) as work:
+            with patch.object(backends, '_stop', failing), \
+                    patch.object(backends.time, 'monotonic', clock):
+                outcome = {}
+                result = backends._run_bounded([sys.executable, '-c', 'pass'], work,
+                                               {'PATH': '/usr/bin:/bin'}, 5, 1024, outcome)
+        self.assertTrue(result[1])
+        self.assertEqual(calls['stops'], 2)
+        self.assertTrue(outcome['reaped'], 'the final poll confirmed it had exited')
+
     def test_launch_failure_says_not_launched(self):
         (self.vault / 'a.md').write_text('solar')
         workspace = self.root / 'qmd'

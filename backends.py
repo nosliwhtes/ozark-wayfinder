@@ -136,6 +136,12 @@ def _run_bounded(command, cwd, env, timeout, limit, outcome):
                     reaped = True  # it had already exited; the poll reaped it
                 else:
                     reaped = attempt(1)
+                    if not reaped:
+                        try:
+                            # It may have exited while the second attempt was failing.
+                            reaped = process.poll() is not None
+                        except OSError:
+                            reaped = False
             outcome['reaped'] = reaped
             return reaped
 
