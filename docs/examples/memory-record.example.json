@@ -1,0 +1,22 @@
+{
+  "example_only": true,
+  "schema_status": "illustrative-not-an-import-contract",
+  "id": "demo-fact-001",
+  "content": "The fictional Demo Project uses plain-text release notes.",
+  "scope": "demo-workspace",
+  "sensitivity": "synthetic-nonpersonal",
+  "provenance": {
+    "kind": "explicit-statement",
+    "reference": "demo-source-001",
+    "quote": "For Demo Project, use plain-text release notes."
+  },
+  "review": {
+    "status": "fixture-only",
+    "confidence": "stated-not-independently-verified"
+  },
+  "validity": {
+    "status": "current-in-fixture",
+    "supersedes": null
+  },
+  "knowledge_publication": "not-authorized"
+}

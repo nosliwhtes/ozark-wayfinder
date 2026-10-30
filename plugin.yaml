@@ -1,0 +1,42 @@
+manifest_version: 2
+name: ozark-wayfinder
+version: 0.1.0
+description: Canonical Markdown recall with isolated optional QMD and read-only Mnemosyne evidence.
+author: Ozark Wayfinder contributors
+license: MIT
+kind: standalone
+provides_tools:
+  - wayfinder_recall
+  - wayfinder_checkpoint
+  - wayfinder_health
+python_dependencies: []
+requires_env: []
+config_schema:
+  vault_root:
+    type: str
+    description: Explicit absolute path to an existing canonical Markdown vault. No default.
+  curated_roots:
+    type: list
+    default: [curated]
+  imported_roots:
+    type: list
+    default: [imports, sources]
+  max_files:
+    type: int
+    default: 5000
+  max_file_bytes:
+    type: int
+    default: 1048576
+  mnemosyne_db:
+    type: str
+    description: Optional explicit absolute SQLite database path; read-only, global memories only.
+  qmd_workspace:
+    type: str
+    description: Optional dedicated absolute QMD workspace, never an ambient index.
+  qmd_command:
+    type: list
+    default: [qmd]
+    description: Trusted local QMD executable argv prefix, not shell text.
+  qmd_timeout:
+    type: float
+    default: 10
