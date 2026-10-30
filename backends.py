@@ -129,10 +129,12 @@ def _run_bounded(command, cwd, env, timeout, limit, outcome):
             reaped = attempt(0)
             if not reaped:
                 try:
-                    alive = process.poll() is None
+                    status = process.poll()
                 except OSError:
-                    alive = True
-                if alive:
+                    status = None
+                if status is not None:
+                    reaped = True  # it had already exited; the poll reaped it
+                else:
                     reaped = attempt(1)
             outcome['reaped'] = reaped
             return reaped
@@ -169,7 +171,9 @@ def _run_bounded(command, cwd, env, timeout, limit, outcome):
             # two windows can never add up.
             if not window['done']:
                 try:
-                    if process.poll() is None:
+                    if process.poll() is not None:
+                        outcome['reaped'] = True
+                    else:
                         stop_child()
                 except OSError:
                     pass

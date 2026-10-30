@@ -662,6 +662,32 @@ class RecallTests(unittest.TestCase):
                                       {'PATH': '/usr/bin:/bin'}, 5, 1024, outcome)
         self.assertTrue(outcome['reaped'])
 
+    def test_a_child_that_exits_during_a_failed_stop_is_not_called_alive(self):
+        """A stop that fails on an already-exited child must not report it alive."""
+        import sys, importlib, tempfile
+        from unittest.mock import patch
+        backends = importlib.import_module('backends')
+        real_monotonic = backends.time.monotonic
+        start = real_monotonic()
+        calls = {'n': 0}
+
+        def clock():  # second read jumps past the deadline
+            calls['n'] += 1
+            return start if calls['n'] == 1 else start + 1000
+
+        def failing(process, budget):
+            process.wait(timeout=5)  # the child finishes while the kill is "failing"
+            raise OSError('kill refused')
+
+        with tempfile.TemporaryDirectory(dir=self.root) as work:
+            with patch.object(backends, '_stop', failing), \
+                    patch.object(backends.time, 'monotonic', clock):
+                outcome = {}
+                result = backends._run_bounded([sys.executable, '-c', 'pass'], work,
+                                               {'PATH': '/usr/bin:/bin'}, 5, 1024, outcome)
+        self.assertTrue(result[1], 'should have reported a timeout')
+        self.assertTrue(outcome['reaped'], 'the poll confirmed it had exited')
+
     def test_launch_failure_says_not_launched(self):
         (self.vault / 'a.md').write_text('solar')
         workspace = self.root / 'qmd'
