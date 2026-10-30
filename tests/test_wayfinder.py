@@ -342,10 +342,61 @@ class RecallTests(unittest.TestCase):
             def kill(self):
                 raise OSError('no such process')
 
-            def wait(self):
+            def wait(self, timeout=None):
+                self.seen = timeout
                 raise OSError('no such process')
 
-        self.assertIsNone(backends._stop(Fixture()))
+        fixture = Fixture()
+        self.assertIsNone(backends._stop(fixture))
+        # Reaping must stay bounded even when the kill itself failed.
+        self.assertEqual(fixture.seen, 5.0)
+
+    def test_wide_directory_is_not_enumerated_past_the_budget(self):
+        """Collecting a whole huge directory would defeat the entry budget."""
+        import os, types
+        from unittest.mock import patch
+        import wayfinder
+        consumed = [0]
+        real_vault = str(self.vault)
+
+        class FakeScandir:
+            def __init__(self):
+                self.closed = False
+
+            def __enter__(self):
+                return self._entries()
+
+            def __exit__(self, *exc):
+                return False
+
+            def _entries(self):
+                for index in range(1000):
+                    consumed[0] += 1
+                    name = f'f{index}.txt'
+                    yield types.SimpleNamespace(name=name, path=f'{real_vault}/{name}',
+                                                is_dir=lambda follow_symlinks=True: False,
+                                                is_symlink=lambda: False)
+
+        def fake_scandir(path):
+            return FakeScandir() if str(path) == real_vault else os.scandir(path)
+
+        with patch.object(wayfinder.os, 'scandir', fake_scandir):
+            reply = self.service(max_files=4).recall('solar')
+        self.assertEqual(reply['backends']['markdown']['code'], 'scan_limit')
+        # One entry past the budget is peeked at, not the whole 1000-entry listing.
+        self.assertLessEqual(consumed[0], 5)
+
+    def test_scan_cap_probe_does_not_overrun_on_an_exact_boundary(self):
+        import sqlite3
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
+            conn.executemany("INSERT INTO working_memory VALUES (?, 'solar', 'x', '{}', 'global', 's', NULL, '2000-01-01')",
+                             [(f'old-{i}',) for i in range(5000)])
+            conn.commit()
+        reply = self.service(mnemosyne_db=database).recall('solar')
+        # Exactly the cap and nothing after it: not truncated.
+        self.assertNotIn('code', reply['backends']['mnemosyne'])
 
     def test_row_cap_still_applies_to_live_rows(self):
         import sqlite3

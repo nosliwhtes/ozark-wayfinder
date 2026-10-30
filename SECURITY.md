@@ -2,7 +2,7 @@
 
 ## What this plugin can touch
 
-- Reads every `.md` file under `vault_root` up to `max_files` and `max_file_bytes`.
+- Reads `.md` files under `vault_root` until `max_files` directory entries have been visited, skipping hidden entries and symlinks, up to `max_file_bytes` each.
 - Writes one new `.md` file inside `vault_root` when `confirm=true`.
 - Runs the `qmd_command` argv as a subprocess, if `qmd_workspace` is set.
 - Opens `mnemosyne_db` read-only, if set.

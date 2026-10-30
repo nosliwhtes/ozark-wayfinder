@@ -66,20 +66,21 @@ def _live_rows(conn, sql, params):
         if len(page) < PAGE_ROWS:
             break
     if scanned >= SCAN_ROWS:
-        more = list(conn.execute(sql, (*params, scanned)))
-        return live, bool(more)
+        # One-row existence probe: a further page would put the read cap over its number.
+        probe = sql.replace(f'LIMIT {PAGE_ROWS}', 'LIMIT 1')
+        return live, bool(list(conn.execute(probe, (*params, scanned))))
     return live, False
 
 
-def _stop(process):
-    """Reap a child without letting a failing kill mask the reason we stopped."""
+def _stop(process, timeout=5.0):
+    """Reap a child without letting a failing kill hang or mask the reason we stopped."""
     try:
         process.kill()
     except OSError:
         pass
     try:
-        process.wait()
-    except OSError:
+        process.wait(timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
         pass
 
 

@@ -124,22 +124,33 @@ class Wayfinder:
         def note(entry):
             if len(errors) < MAX_ERRORS:
                 errors.append(entry)
-        # A manual stack over scandir: os.walk materialises a whole directory before any budget
-        # check, so a wide tree could still be walked for free.
+        # A manual stack over scandir that also caps how many entries are collected per
+        # directory: os.walk materialises a whole directory before any budget check, so a wide
+        # tree could still be walked for free. Ordering is directory order, not name order,
+        # wherever the budget truncates a listing.
         stack = [self.vault]
         while stack and not limited:
             root = stack.pop()
+            if count >= self.settings.max_files:
+                limited = True
+                break
+            room = self.settings.max_files - count
+            entries = []
             try:
                 with os.scandir(root) as listing:
-                    entries = sorted(listing, key=lambda entry: entry.name)
+                    for entry in listing:
+                        entries.append(entry)
+                        if len(entries) > room:
+                            break
             except OSError as exc:
                 note({'code': 'walk_error', 'detail': type(exc).__name__})
                 continue
+            if len(entries) > room:
+                limited = True
+                del entries[room:]
+            entries.sort(key=lambda entry: entry.name)
             descend = []
             for entry in entries:
-                if count >= self.settings.max_files:
-                    limited = True
-                    break
                 count += 1
                 if entry.name.startswith('.'):
                     continue

@@ -3,9 +3,9 @@
 Local, cited recall over your own Markdown knowledge — with optional read-only evidence from
 QMD and Mnemosyne — as a Hermes plugin.
 
-Wayfinder keeps your notes as the source of truth. Every hit is a real file and line, or a record
-citation, and curated notes always outrank imported ones. Nothing is captured automatically,
-nothing is uploaded, and a failed optional backend is reported instead of hidden.
+Wayfinder keeps your notes as the source of truth. Every hit is either a real file and line or a
+record citation, and curated notes always outrank imported ones. Nothing is captured
+automatically, nothing is uploaded, and a failed optional backend is reported instead of hidden.
 
 ```
 wayfinder_recall      cited Markdown scan, optionally + QMD BM25 + Mnemosyne evidence
@@ -77,24 +77,24 @@ qmd --index wayfinder collection add /absolute/path/to/vault --name vault --mask
 
 Point `mnemosyne_db` at a SQLite file to add lexical evidence from `working_memory` and
 `episodic_memory`. Only global rows are read; expired, superseded and session-scoped rows are
-excluded. Records that name a `vault_note` resolve to a real file; anything else stays an
-unlinked memory hit, so a stale path can never force a foreign read.
+excluded. A record that names an existing `vault_note` resolves to that note; a record with no
+usable target stays a record citation, so a stale path can never force a foreign read.
 
 ## What verification has shown
 
 Run from the project root, with the host interpreter for the host test:
 
 ```sh
-python -m unittest discover -s tests -v   # 34 tests, 0 failures
+python -m unittest discover -s tests -v   # 36 tests, 0 failures
 python tools/verify_host.py               # official doctor: 3 tools, 0 hooks
-python tools/verify_bootstrap.py          # clean-venv wheel install: 31 passed, 3 expected skips
+python tools/verify_bootstrap.py          # clean-venv wheel install: 33 passed, 3 expected skips
 ```
 
-- Default suite: **32 pass, 2 optional skips**. The suite includes a real `PluginManager`
+- Default suite: **34 pass, 2 optional skips**. The suite includes a real `PluginManager`
   discovery, scoped dispatch, checkpoint readback and unload in an isolated `HOME`/`HERMES_HOME`
   — no mocked plugin context.
 - `RUN_QMD_INTEGRATION=1 MNEMOSYNE_PYTHON=<interpreter-with-mnemosyne>` against a real QMD
-  binary and a real Mnemosyne database: **34/34, no skips**, all on synthetic data.
+  binary and a real Mnemosyne database: **36/36, no skips**, all on synthetic data.
 - Clean bootstrap builds and installs the wheel in a fresh venv with declared dependencies only.
 
 Both verification scripts stay inside the project and never enable the live profile.
