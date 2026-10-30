@@ -84,70 +84,86 @@ def _stop(process, timeout):
         return False
 
 
-def _run_bounded(command, cwd, env, timeout, limit):
+def _run_bounded(command, cwd, env, timeout, limit, outcome):
     """Run without a shell, killing the child if it outruns either bound.
 
     Output goes to temp files, so disk use is capped by polling rather than by RAM.
-    Returns (returncode | None, timed_out, over_limit, stdout_bytes, reaped).
-    ``reaped`` is False only when the child could not be confirmed gone.
+    Returns (returncode | None, timed_out, over_limit, stdout_bytes) and records the fate of
+    the child in ``outcome['reaped']`` (True / False / None while it is still running), so a
+    retry performed during unwinding is visible to the caller.
     """
+    outcome['reaped'] = None
     with tempfile.TemporaryFile(dir=cwd) as output, tempfile.TemporaryFile(dir=cwd) as errors:
         process = subprocess.Popen(command, cwd=cwd, env=env, stdout=output, stderr=errors,
                                    stdin=subprocess.DEVNULL)
-        stopped = False
-        cleanup_deadline = None
+        window = {'start': None, 'done': False}
+
+        def stop_child():
+            """Up to two kill+wait attempts inside one 5s window. Idempotent."""
+            if window['done']:
+                return outcome['reaped']
+            window['done'] = True
+
+            def budget(spent):
+                if window['start'] is None:
+                    return 5.0 if spent == 0 else 0.001
+                return max(0.001, (window['start'] + 5) - time.monotonic())
+
+            def attempt(spent):
+                try:
+                    return _stop(process, budget(spent))
+                except (OSError, RuntimeError):
+                    return False
+
+            try:
+                window['start'] = time.monotonic()
+            except RuntimeError:
+                window['start'] = None
+            reaped = attempt(0)
+            if not reaped:
+                try:
+                    alive = process.poll() is None
+                except OSError:
+                    alive = True
+                if alive:
+                    reaped = attempt(1)
+            outcome['reaped'] = reaped
+            return reaped
+
         try:
             # Inside the try, so a failure here cannot strand the child we just launched.
             deadline = time.monotonic() + timeout
-            def cleanup_budget():
-                return max(0.001, (cleanup_deadline or 0.0) - time.monotonic())
-            def settle():
-                # Cleanup gets its own 5s window from the moment it starts, not from the
-                # execution deadline, so an early overflow does not wait out the timeout too.
-                nonlocal cleanup_deadline
-                if cleanup_deadline is None:
-                    try:
-                        cleanup_deadline = time.monotonic() + 5
-                    except RuntimeError:
-                        return _stop(process, 5)
-                try:
-                    return _stop(process, cleanup_budget())
-                except OSError:
-                    return False
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    stopped = settle()
-                    return None, True, False, b"", stopped
+                    stop_child()
+                    return None, True, False, b""
                 try:
                     code = process.wait(timeout=min(0.05, remaining))
                 except subprocess.TimeoutExpired:
                     if output.tell() > limit or errors.tell() > limit:
-                        stopped = settle()
-                        return None, False, True, b"", stopped
+                        stop_child()
+                        return None, False, True, b""
                     continue
                 # A child that finished after the deadline still overran the bound.
                 if time.monotonic() > deadline:
-                    return None, True, False, b"", True
+                    outcome['reaped'] = True
+                    return None, True, False, b""
                 break
             if output.tell() > limit or errors.tell() > limit:
-                return code, False, True, b"", True
+                outcome['reaped'] = True
+                return code, False, True, b""
             output.seek(0)
-            return code, False, False, output.read(), True
+            outcome['reaped'] = True
+            return code, False, False, output.read()
         finally:
-            # Retry only if the earlier attempt could not confirm the child was gone. Both
-            # attempts share one deadline, so they cannot stack into two timeouts, and a clock
-            # failure here must not skip reaping altogether.
-            if not stopped and process.poll() is None:
+            # Only if we never got as far as stopping it (an exception while unwinding), so the
+            # two windows can never add up.
+            if not window['done']:
                 try:
-                    budget = 5.0
-                    if cleanup_deadline is not None:
-                        try:
-                            budget = max(0.001, cleanup_deadline - time.monotonic())
-                        except RuntimeError:
-                            pass
-                    _stop(process, budget)
-                except (OSError, RuntimeError):
+                    if process.poll() is None:
+                        stop_child()
+                except OSError:
                     pass
 
 
@@ -170,11 +186,17 @@ def qmd_search(settings, query):
     if any(p.is_symlink() for p in (root, root / 'index.sqlite3', root / 'config', root / 'config/wayfinder.yml')):
         return failure('symlink_state')
     command = list(settings.qmd_command) + ['--index', 'wayfinder', 'search', query, '-c', 'vault', '--json', '-n', '50']
+    outcome = {}
     try:
         # QMD is a user-chosen trusted local executable; both streams are bounded while running.
-        code, timed_out, over_limit, raw, reaped = _run_bounded(
-            command, root, qmd_environment(root), settings.qmd_timeout, OUTPUT_LIMIT)
-        child = 'reaped' if reaped else 'alive'
+        try:
+            code, timed_out, over_limit, raw = _run_bounded(
+                command, root, qmd_environment(root), settings.qmd_timeout, OUTPUT_LIMIT, outcome)
+        except OSError:
+            # Launch or read failure: still say whether the child we did start is gone.
+            return failure('executable_or_workspace_unavailable',
+                           child='reaped' if outcome.get('reaped') else 'alive')
+        child = 'reaped' if outcome.get('reaped') else 'alive'
         if over_limit:
             return failure('output_limit', child=child)
         if timed_out:
@@ -188,8 +210,9 @@ def qmd_search(settings, query):
         return data, {'status': 'ok', 'mode': 'bm25_local'}
     except (json.JSONDecodeError, UnicodeError):
         return failure('invalid_json')
-    except OSError:
-        return failure('executable_or_workspace_unavailable')
+    except RuntimeError:
+        # e.g. a clock that stopped answering; still report the child rather than crashing.
+        return failure('internal_error', child='reaped' if outcome.get('reaped') else 'alive')
 
 
 def mnemosyne_search(settings, terms):

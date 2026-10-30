@@ -363,8 +363,10 @@ class RecallTests(unittest.TestCase):
 
         service = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script)))
         with patch.object(backends.subprocess, 'Popen', recording), patch.object(backends.time, 'monotonic', flaky):
-            with self.assertRaises(RuntimeError):
-                service.recall('solar')
+            reply = service.recall('solar')
+        # A stopped clock is reported as a structured backend error, not a crash.
+        self.assertEqual(reply['backends']['qmd']['code'], 'internal_error')
+        self.assertEqual(reply['backends']['qmd']['child'], 'reaped')
         self.assertEqual(len(spawned), 1)
         self.assertIsNotNone(spawned[0].poll(), 'child was left running')
 
@@ -533,23 +535,65 @@ class RecallTests(unittest.TestCase):
         script = self.root / 'fake_qmd.py'
         script.write_text('import sys, time\nsys.stdout.write("x" * 2200000)\nsys.stdout.flush()\ntime.sleep(12)\n')
         calls = []
+        spawned = []
+        real_popen = backends.subprocess.Popen
 
         def slow_failure(process, budget):
             calls.append(budget)
             time.sleep(min(budget, 5))
             raise OSError('kill refused')
 
+        def recording_popen(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            spawned.append(process)
+            return process
+
         service = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script)), qmd_timeout=8)
         started = time.monotonic()
-        with patch.object(backends, '_stop', slow_failure):
+        with patch.object(backends, '_stop', slow_failure), patch.object(backends.subprocess, 'Popen', recording_popen):
             try:
                 reply = service.recall('solar')
             finally:
-                pass
+                if spawned and spawned[0].poll() is None:
+                    spawned[0].kill()
+                    spawned[0].wait()
         elapsed = time.monotonic() - started
         self.assertEqual(reply['backends']['qmd']['code'], 'output_limit')
         # A shared deadline anchored at the execution timeout would take about 10s here.
         self.assertLess(elapsed, 7)
+
+    def test_cleanup_window_survives_a_broken_clock(self):
+        """If the clock stops answering, the retry must not get a second full window."""
+        import sys, importlib, tempfile
+        from unittest.mock import patch
+        backends = importlib.import_module('backends')
+        budgets = []
+        spawned = []
+        real_popen = backends.subprocess.Popen
+
+        def recording_stop(process, budget):
+            budgets.append(budget)
+            return False  # pretend the kill never worked, so both attempts are exercised
+
+        def recording_popen(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        with tempfile.TemporaryDirectory(dir=self.root) as work:
+            with patch.object(backends, '_stop', recording_stop), \
+                    patch.object(backends.subprocess, 'Popen', recording_popen), \
+                    patch.object(backends.time, 'monotonic', side_effect=RuntimeError('clock')):
+                outcome = {}
+                with self.assertRaises(RuntimeError):
+                    backends._run_bounded([sys.executable, '-c', 'import time; time.sleep(8)'],
+                                          work, {'PATH': '/usr/bin:/bin'}, 2, 1024, outcome)
+            if spawned and spawned[0].poll() is None:
+                spawned[0].kill()
+                spawned[0].wait()
+        self.assertEqual(budgets[0], 5.0)
+        self.assertLessEqual(budgets[1], 0.05)
+        self.assertFalse(outcome['reaped'])
 
     def test_row_cap_still_applies_to_live_rows(self):
         import sqlite3

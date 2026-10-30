@@ -275,6 +275,8 @@ class Wayfinder:
                     if row['source_label'] not in labels:
                         labels.append(row['source_label'])
             else:
+                if row.get('source_label'):
+                    row['source_labels'] = [row['source_label']]
                 merged[key] = row
         rows = list(merged.values())
         rows.sort(key=lambda r: ({'curated': 0, 'unclassified': 1, 'episodic': 2, 'imported': 3}[r['tier']],
