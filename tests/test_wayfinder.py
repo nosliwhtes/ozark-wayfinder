@@ -672,18 +672,77 @@ class RecallTests(unittest.TestCase):
                              qmd_command=(str(self.root / 'no-such-qmd'),)).recall('solar')
         self.assertEqual(reply['backends']['qmd']['child'], 'not_launched')
 
+    def test_a_launch_that_raises_oserror_or_neither_is_still_not_launched(self):
+        import sys, importlib
+        from unittest.mock import patch
+        backends = importlib.import_module('backends')
+        (self.vault / 'a.md').write_text('solar')
+        workspace = self.root / 'qmd'
+        (workspace / 'config').mkdir(parents=True)
+        (workspace / 'index.sqlite3').touch()
+        (workspace / 'config/wayfinder.yml').write_text('collections: {}')
+        service = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, '-c', 'pass'))
+        for error in (OSError('spawn failed'), RuntimeError('spawn exploded')):
+            with patch.object(backends.subprocess, 'Popen', side_effect=error):
+                reply = service.recall('solar')
+            self.assertEqual(reply['backends']['qmd']['child'], 'not_launched')
+
+    def test_an_oserror_clock_still_kills(self):
+        import sys, importlib, tempfile
+        from unittest.mock import patch
+        backends = importlib.import_module('backends')
+        budgets = []
+        real_monotonic = backends.time.monotonic
+        calls = {'n': 0}
+        start = real_monotonic()
+
+        def clock():
+            calls['n'] += 1
+            if calls['n'] == 1:
+                return start
+            if calls['n'] > 3:
+                raise OSError('clock io')
+            return start + 1000
+
+        def failing(process, budget):
+            budgets.append(budget)
+            raise OSError('kill refused')
+
+        spawned = []
+        real_popen = backends.subprocess.Popen
+
+        def recording_popen(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        with tempfile.TemporaryDirectory(dir=self.root) as work:
+            with patch.object(backends, '_stop', failing), \
+                    patch.object(backends.subprocess, 'Popen', recording_popen), \
+                    patch.object(backends.time, 'monotonic', clock):
+                outcome = {}
+                result = backends._run_bounded([sys.executable, '-c', 'import time; time.sleep(8)'],
+                                               work, {'PATH': '/usr/bin:/bin'}, 0.05, 1024, outcome)
+            if spawned and spawned[0].poll() is None:
+                spawned[0].kill()
+                spawned[0].wait()
+        self.assertTrue(result[1])
+        self.assertTrue(budgets, 'no kill was attempted')
+        self.assertEqual(budgets[0], 5.0)
+
     def test_a_note_named_like_a_record_citation_does_not_merge(self):
         import sqlite3
         (self.vault / 'curated').mkdir()
-        (self.vault / 'curated/mnemosyne:working_memory:x.md').write_text('solar note')
+        # The record id ends in .md, so its citation is exactly this note's relative path.
+        (self.vault / 'mnemosyne:working_memory:x.md').write_text('solar note')
         database = self.root / 'memory.sqlite3'
         with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
             conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
-            conn.execute("INSERT INTO working_memory VALUES ('x', 'solar', 'checkpoint', '{}', 'global', 's', NULL, NULL)")
+            conn.execute("INSERT INTO working_memory VALUES ('x.md', 'solar', 'checkpoint', '{}', 'global', 's', NULL, NULL)")
             conn.commit()
         results = self.service(mnemosyne_db=database).recall('solar')['results']
-        note = next(r for r in results if r['path'] == 'curated/mnemosyne:working_memory:x.md')
-        record = next(r for r in results if r['citation'] == 'mnemosyne:working_memory:x')
+        note = next(r for r in results if r['path'] == 'mnemosyne:working_memory:x.md')
+        record = next(r for r in results if r['citation'] == 'mnemosyne:working_memory:x.md')
         self.assertNotIn('source_label', note)
         self.assertEqual(record['source_label'], 'checkpoint')
 

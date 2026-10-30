@@ -113,7 +113,7 @@ def _run_bounded(command, cwd, env, timeout, limit, outcome):
                     if window['start'] is None:
                         return floor
                     return max(0.001, (window['start'] + 5) - time.monotonic())
-                except RuntimeError:
+                except (RuntimeError, OSError):
                     return floor
 
             def attempt(spent):
@@ -124,7 +124,7 @@ def _run_bounded(command, cwd, env, timeout, limit, outcome):
 
             try:
                 window['start'] = time.monotonic()
-            except RuntimeError:
+            except (RuntimeError, OSError):
                 window['start'] = None
             reaped = attempt(0)
             if not reaped:
@@ -200,12 +200,12 @@ def qmd_search(settings, query):
         try:
             code, timed_out, over_limit, raw = _run_bounded(
                 command, root, qmd_environment(root), settings.qmd_timeout, OUTPUT_LIMIT, outcome)
-        except OSError:
+        except (OSError, RuntimeError) as exc:
             # Launch or read failure: only claim a child state if one was actually started.
             if not outcome.get('spawned'):
                 return failure('executable_or_workspace_unavailable', child='not_launched')
-            return failure('executable_or_workspace_unavailable',
-                           child='reaped' if outcome.get('reaped') else 'alive')
+            code = 'internal_error' if isinstance(exc, RuntimeError) else 'executable_or_workspace_unavailable'
+            return failure(code, child='reaped' if outcome.get('reaped') else 'alive')
         child = 'reaped' if outcome.get('reaped') else 'alive'
         if over_limit:
             return failure('output_limit', child=child)
@@ -222,7 +222,9 @@ def qmd_search(settings, query):
         return failure('invalid_json')
     except RuntimeError:
         # e.g. a clock that stopped answering; still report the child rather than crashing.
-        return failure('internal_error', child='reaped' if outcome.get('reaped') else 'alive')
+        return failure('internal_error',
+                       child='reaped' if outcome.get('reaped') else
+                       ('alive' if outcome.get('spawned') else 'not_launched'))
 
 
 def mnemosyne_search(settings, terms):

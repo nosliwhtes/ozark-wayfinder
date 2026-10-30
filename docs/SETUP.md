@@ -19,7 +19,7 @@ There is no entry point and no installer. The wheel exists for library use only.
 1. **Host:** a Hermes build with the v2 plugin contract, Python >= 3.11, POSIX filesystem APIs. Only Linux/Python 3.14 was exercised; certify your own combination before trusting it.
 2. **Vault:** an existing absolute directory you own, laid out so curated and imported material are separable by prefix. Nothing is discovered for you.
 3. **Dependencies:** none for the plugin itself. QMD and Mnemosyne are optional and stay separately managed — the plugin never installs, updates or imports either.
-4. **Storage:** write access only to the vault (for `checkpoint`) and read access to the Mnemosyne file if you enable it. Keep runtime state out of the source tree.
+4. **Storage:** write access to the vault (for `checkpoint`), read access to the Mnemosyne file if you enable it, and write access to the QMD workspace if you enable that — the adapter puts its child's temp output there. Keep runtime state out of the source tree.
 
 ## Hermes preflight
 
@@ -47,8 +47,9 @@ Run against disposable state and synthetic notes only. Require, per point, actua
 - `wayfinder_checkpoint` previews without writing; `confirm=true` writes and reports `verified`;
   the same path again returns `target_exists` and leaves the file untouched.
 - Relative traversal (`../`), a hidden directory and a symlinked directory are all refused.
-- With `mnemosyne_db` set to a file whose `working_memory` table is missing, recall still returns
-  Markdown results and marks the memory backend degraded — no fabricated hits.
+- With `mnemosyne_db` set to a file that has neither memory table, recall still returns Markdown
+  results and marks the memory backend degraded — no fabricated hits. (A file with only one of the
+  two tables is usable, so drop both to see this.)
 - With QMD enabled but unreachable, the same: results plus a visible error.
 - Nothing appears outside the vault, no network call is made with QMD disabled, and no message,
   schedule or index is created.

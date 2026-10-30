@@ -16,7 +16,7 @@ Each rule below is marked **met by absence** (0.1.0 never performs the risky act
 - Reject credentials and unauthorized sensitive material before persistence, indexing, logging, and publication. Pattern matching alone cannot guarantee detection. — **not implemented**; only path rules and size limits are enforced.
 - Bind private state to the active profile. Do not silently fall back to another profile, a guessed chat identity, or a global shared store. — **met by design**: every path is an explicit setting; nothing is discovered and no default profile is used.
 - Give retrieval only the scope it needs. A fact being important does not authorize its appearance in an unrelated context. — **partly met**: `limit` defaults to 8 and is capped at 50, and only global Mnemosyne rows are read. Session-scoped rows are excluded outright, so there is no per-session narrowing yet.
-- Return bounded content with provenance and honest degradation signals. Avoid raw content in operational error messages. — **met by design**: results carry file/line or `mnemosyne:<id>` citations plus a tier; failures return codes, not note text.
+- Return bounded content with provenance and honest degradation signals. Avoid raw content in operational error messages. — **met by design**: results carry a `path:line`, a `mnemosyne:<id>` or a QMD URI citation plus a tier (the URI stands in when a hit was not opened); failures return codes, not note text.
 - Require an explicit candidate boundary before private memory can feed a knowledge-ingest queue. Staging is not consent to publish. — **future**: there is no ingest queue yet; `wayfinder_checkpoint` writes straight to the configured vault.
 
 The inspected backend supports turn synchronization as well as explicit writes, so “using local

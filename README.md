@@ -4,9 +4,9 @@ Local, cited recall over your own Markdown knowledge — with optional read-only
 QMD and Mnemosyne — as a Hermes plugin.
 
 Wayfinder keeps your notes as the source of truth. Every hit is a real file and line, a record
-citation, or a record citation that also names the note it points at, and curated notes always
-outrank imported ones. Nothing is captured automatically, nothing is uploaded, and a failed
-optional backend is reported instead of hidden.
+citation, or — when a linked read was skipped — the record or URI plus the path it points at, and
+curated notes always outrank imported ones. Nothing is captured automatically, nothing is
+uploaded, and a failed optional backend is reported instead of hidden.
 
 ```
 wayfinder_recall      cited Markdown scan, optionally + QMD BM25 + Mnemosyne evidence
@@ -88,16 +88,16 @@ record citation that still carries the path, so a stale target can never force a
 Run from the project root, with the host interpreter for the host test:
 
 ```sh
-python -m unittest discover -s tests -v   # 47 tests, 0 failures
+python -m unittest discover -s tests -v   # 49 tests, 0 failures
 python tools/verify_host.py               # official doctor: 3 tools, 0 hooks
-python tools/verify_bootstrap.py          # clean-venv wheel install: 44 passed, 3 expected skips
+python tools/verify_bootstrap.py          # clean-venv wheel install: 46 passed, 3 expected skips
 ```
 
-- Default suite: **45 pass, 2 optional skips**. The suite includes a real `PluginManager`
+- Default suite: **47 pass, 2 optional skips**. The suite includes a real `PluginManager`
   discovery, scoped dispatch, checkpoint readback and unload in an isolated `HOME`/`HERMES_HOME`
   — no mocked plugin context.
 - `RUN_QMD_INTEGRATION=1 MNEMOSYNE_PYTHON=<interpreter-with-mnemosyne>` against a real QMD
-  binary and a real Mnemosyne database: **47/47, no skips**, all on synthetic data.
+  binary and a real Mnemosyne database: **49/49, no skips**, all on synthetic data.
 - Clean bootstrap builds and installs the wheel in a fresh venv with declared dependencies only.
 
 Both verification scripts stay inside the project and never enable the live profile.
