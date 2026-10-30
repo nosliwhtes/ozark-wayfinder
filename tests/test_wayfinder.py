@@ -595,6 +595,98 @@ class RecallTests(unittest.TestCase):
         self.assertLessEqual(budgets[1], 0.05)
         self.assertFalse(outcome['reaped'])
 
+    def test_a_clock_that_dies_mid_cleanup_still_kills(self):
+        """The budget arithmetic must not be able to skip the kill entirely."""
+        import sys, importlib, tempfile
+        from unittest.mock import patch
+        backends = importlib.import_module('backends')
+        budgets = []
+        real_monotonic = backends.time.monotonic
+        calls = {'n': 0}
+
+        start = real_monotonic()
+
+        def clock():
+            """Deadline, then jump past it, then die: the window opens on a dead clock."""
+            calls['n'] += 1
+            if calls['n'] == 1:
+                return start
+            if calls['n'] > 3:
+                raise RuntimeError('clock')
+            return start + 1000
+
+        def failing(process, budget):
+            budgets.append(budget)
+            raise OSError('kill refused')
+
+        spawned = []
+        real_popen = backends.subprocess.Popen
+
+        def recording_popen(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        with tempfile.TemporaryDirectory(dir=self.root) as work:
+            with patch.object(backends, '_stop', failing), \
+                    patch.object(backends.subprocess, 'Popen', recording_popen), \
+                    patch.object(backends.time, 'monotonic', clock):
+                outcome = {}
+                result = backends._run_bounded([sys.executable, '-c', 'import time; time.sleep(8)'],
+                                               work, {'PATH': '/usr/bin:/bin'}, 0.05, 1024, outcome)
+            if spawned and spawned[0].poll() is None:
+                spawned[0].kill()
+                spawned[0].wait()
+        # The window started, then the clock died: the kill attempt still happened.
+        self.assertTrue(result[1], 'should have reported a timeout')
+        self.assertTrue(budgets)
+        self.assertEqual(budgets[0], 5.0)
+
+    def test_a_finished_child_is_reported_reaped_even_if_the_clock_dies(self):
+        import sys, importlib, tempfile
+        from unittest.mock import patch
+        backends = importlib.import_module('backends')
+        real_monotonic = backends.time.monotonic
+        calls = {'n': 0}
+
+        def clock():  # dies on the comparison right after a successful wait
+            calls['n'] += 1
+            if calls['n'] > 3:
+                raise RuntimeError('clock')
+            return real_monotonic()
+
+        with tempfile.TemporaryDirectory(dir=self.root) as work:
+            with patch.object(backends.time, 'monotonic', clock):
+                outcome = {}
+                backends._run_bounded([sys.executable, '-c', 'pass'], work,
+                                      {'PATH': '/usr/bin:/bin'}, 5, 1024, outcome)
+        self.assertTrue(outcome['reaped'])
+
+    def test_launch_failure_says_not_launched(self):
+        (self.vault / 'a.md').write_text('solar')
+        workspace = self.root / 'qmd'
+        (workspace / 'config').mkdir(parents=True)
+        (workspace / 'index.sqlite3').touch()
+        (workspace / 'config/wayfinder.yml').write_text('collections: {}')
+        reply = self.service(qmd_workspace=workspace,
+                             qmd_command=(str(self.root / 'no-such-qmd'),)).recall('solar')
+        self.assertEqual(reply['backends']['qmd']['child'], 'not_launched')
+
+    def test_a_note_named_like_a_record_citation_does_not_merge(self):
+        import sqlite3
+        (self.vault / 'curated').mkdir()
+        (self.vault / 'curated/mnemosyne:working_memory:x.md').write_text('solar note')
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
+            conn.execute("INSERT INTO working_memory VALUES ('x', 'solar', 'checkpoint', '{}', 'global', 's', NULL, NULL)")
+            conn.commit()
+        results = self.service(mnemosyne_db=database).recall('solar')['results']
+        note = next(r for r in results if r['path'] == 'curated/mnemosyne:working_memory:x.md')
+        record = next(r for r in results if r['citation'] == 'mnemosyne:working_memory:x')
+        self.assertNotIn('source_label', note)
+        self.assertEqual(record['source_label'], 'checkpoint')
+
     def test_row_cap_still_applies_to_live_rows(self):
         import sqlite3
         database = self.root / 'memory.sqlite3'

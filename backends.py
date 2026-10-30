@@ -93,9 +93,11 @@ def _run_bounded(command, cwd, env, timeout, limit, outcome):
     retry performed during unwinding is visible to the caller.
     """
     outcome['reaped'] = None
+    outcome['spawned'] = False
     with tempfile.TemporaryFile(dir=cwd) as output, tempfile.TemporaryFile(dir=cwd) as errors:
         process = subprocess.Popen(command, cwd=cwd, env=env, stdout=output, stderr=errors,
                                    stdin=subprocess.DEVNULL)
+        outcome['spawned'] = True
         window = {'start': None, 'done': False}
 
         def stop_child():
@@ -105,9 +107,14 @@ def _run_bounded(command, cwd, env, timeout, limit, outcome):
             window['done'] = True
 
             def budget(spent):
-                if window['start'] is None:
-                    return 5.0 if spent == 0 else 0.001
-                return max(0.001, (window['start'] + 5) - time.monotonic())
+                floor = 5.0 if spent == 0 else 0.001
+                # A clock that fails here must still yield a number, or _stop never runs.
+                try:
+                    if window['start'] is None:
+                        return floor
+                    return max(0.001, (window['start'] + 5) - time.monotonic())
+                except RuntimeError:
+                    return floor
 
             def attempt(spent):
                 try:
@@ -145,9 +152,10 @@ def _run_bounded(command, cwd, env, timeout, limit, outcome):
                         stop_child()
                         return None, False, True, b""
                     continue
+                # It is gone: record that before any further clock read can fail.
+                outcome['reaped'] = True
                 # A child that finished after the deadline still overran the bound.
                 if time.monotonic() > deadline:
-                    outcome['reaped'] = True
                     return None, True, False, b""
                 break
             if output.tell() > limit or errors.tell() > limit:
@@ -193,7 +201,9 @@ def qmd_search(settings, query):
             code, timed_out, over_limit, raw = _run_bounded(
                 command, root, qmd_environment(root), settings.qmd_timeout, OUTPUT_LIMIT, outcome)
         except OSError:
-            # Launch or read failure: still say whether the child we did start is gone.
+            # Launch or read failure: only claim a child state if one was actually started.
+            if not outcome.get('spawned'):
+                return failure('executable_or_workspace_unavailable', child='not_launched')
             return failure('executable_or_workspace_unavailable',
                            child='reaped' if outcome.get('reaped') else 'alive')
         child = 'reaped' if outcome.get('reaped') else 'alive'

@@ -264,7 +264,8 @@ class Wayfinder:
             rows.append(row)
         merged = {}
         for row in rows:
-            key = row.get('path') or row['citation']
+            # Namespaced, so a note literally named like a record citation cannot collide.
+            key = ('path', row['path']) if row.get('path') else ('citation', row['citation'])
             if key in merged:
                 merged[key]['provenance'].extend(row['provenance'])
                 # Keep a label from any surviving backend record; the first row may be Markdown.

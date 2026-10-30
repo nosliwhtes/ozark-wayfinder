@@ -88,16 +88,16 @@ record citation that still carries the path, so a stale target can never force a
 Run from the project root, with the host interpreter for the host test:
 
 ```sh
-python -m unittest discover -s tests -v   # 43 tests, 0 failures
+python -m unittest discover -s tests -v   # 47 tests, 0 failures
 python tools/verify_host.py               # official doctor: 3 tools, 0 hooks
-python tools/verify_bootstrap.py          # clean-venv wheel install: 40 passed, 3 expected skips
+python tools/verify_bootstrap.py          # clean-venv wheel install: 44 passed, 3 expected skips
 ```
 
-- Default suite: **41 pass, 2 optional skips**. The suite includes a real `PluginManager`
+- Default suite: **45 pass, 2 optional skips**. The suite includes a real `PluginManager`
   discovery, scoped dispatch, checkpoint readback and unload in an isolated `HOME`/`HERMES_HOME`
   — no mocked plugin context.
 - `RUN_QMD_INTEGRATION=1 MNEMOSYNE_PYTHON=<interpreter-with-mnemosyne>` against a real QMD
-  binary and a real Mnemosyne database: **43/43, no skips**, all on synthetic data.
+  binary and a real Mnemosyne database: **47/47, no skips**, all on synthetic data.
 - Clean bootstrap builds and installs the wheel in a fresh venv with declared dependencies only.
 
 Both verification scripts stay inside the project and never enable the live profile.
