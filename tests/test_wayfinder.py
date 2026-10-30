@@ -305,6 +305,53 @@ class RecallTests(unittest.TestCase):
         self.assertEqual(row['tier'], 'unclassified')
         self.assertEqual(row['canonical_note_status'], 'not_resolved')
 
+    def test_resolved_memory_hit_keeps_its_source_label(self):
+        import sqlite3
+        (self.vault / 'curated').mkdir()
+        (self.vault / 'curated/c.md').write_text('solar note')
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
+            conn.execute("INSERT INTO working_memory VALUES ('c1', 'solar', 'checkpoint', '{\"vault_note\":\"curated/c.md\"}', 'global', 's', NULL, NULL)")
+            conn.commit()
+        results = self.service(mnemosyne_db=database).recall('solar')['results']
+        row = next(r for r in results if r['citation'] == 'curated/c.md:1')
+        self.assertEqual(row['source_label'], 'checkpoint')
+
+    def test_child_is_reaped_when_the_deadline_setup_raises(self):
+        import sys, importlib, time
+        from unittest.mock import patch
+        backends = importlib.import_module('backends')
+        (self.vault / 'a.md').write_text('solar')
+        workspace = self.root / 'qmd'
+        (workspace / 'config').mkdir(parents=True)
+        (workspace / 'index.sqlite3').touch()
+        (workspace / 'config/wayfinder.yml').write_text('collections: {}')
+        script = self.root / 'fake_qmd.py'
+        script.write_text('import time\ntime.sleep(1)\nprint("[]")\n')
+        spawned = []
+        real_popen = backends.subprocess.Popen
+        real_monotonic = time.monotonic
+        calls = {'n': 0}
+
+        def recording(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        def flaky():
+            calls['n'] += 1
+            if calls['n'] == 1:
+                raise RuntimeError('clock unavailable')
+            return real_monotonic()
+
+        service = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script)))
+        with patch.object(backends.subprocess, 'Popen', recording), patch.object(backends.time, 'monotonic', flaky):
+            with self.assertRaises(RuntimeError):
+                service.recall('solar')
+        self.assertEqual(len(spawned), 1)
+        self.assertIsNotNone(spawned[0].poll(), 'child was left running')
+
     def test_unresolved_qmd_path_is_still_validated(self):
         import sys
         (self.vault / 'curated').mkdir()
@@ -347,9 +394,9 @@ class RecallTests(unittest.TestCase):
                 raise OSError('no such process')
 
         fixture = Fixture()
-        self.assertIsNone(backends._stop(fixture))
+        self.assertFalse(backends._stop(fixture, 0.01))
         # Reaping must stay bounded even when the kill itself failed.
-        self.assertEqual(fixture.seen, 5.0)
+        self.assertEqual(fixture.seen, 0.01)
 
     def test_wide_directory_is_not_enumerated_past_the_budget(self):
         """Collecting a whole huge directory would defeat the entry budget."""
@@ -437,16 +484,23 @@ class RecallTests(unittest.TestCase):
         script.write_text('import time\ntime.sleep(1)\nprint("[]")\n')
         calls = []
 
-        def failing(process):
+        def failing(process, *args):
             calls.append(process)
             raise OSError('kill refused')
 
         with patch.object(backends, '_stop', failing):
-            reply = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script)),
-                                 qmd_timeout=0.05).recall('solar')
+            try:
+                reply = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script)),
+                                     qmd_timeout=0.05).recall('solar')
+            finally:
+                # The patched _stop never reaps, so clean the child up here.
+                child = calls[0] if calls else None
+                if child is not None and child.poll() is None:
+                    child.kill()
+                    child.wait()
         # The reason we stopped survives a failed kill, and only one 5s wait is attempted.
         self.assertEqual(reply['backends']['qmd']['code'], 'timeout')
-        self.assertEqual(len(calls), 1)
+        self.assertLessEqual(len(calls), 2)
 
     def test_row_cap_still_applies_to_live_rows(self):
         import sqlite3

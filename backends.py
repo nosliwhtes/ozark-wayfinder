@@ -71,16 +71,17 @@ def _live_rows(conn, sql, probe, params):
     return live, False
 
 
-def _stop(process, timeout=5.0):
-    """Reap a child without letting a failing kill hang or mask the reason we stopped."""
+def _stop(process, timeout):
+    """Reap a child, bounded. Returns True once it is gone, False if it may still run."""
     try:
         process.kill()
     except OSError:
         pass
     try:
         process.wait(timeout=timeout)
+        return True
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        return False
 
 
 def _run_bounded(command, cwd, env, timeout, limit):
@@ -92,27 +93,29 @@ def _run_bounded(command, cwd, env, timeout, limit):
     with tempfile.TemporaryFile(dir=cwd) as output, tempfile.TemporaryFile(dir=cwd) as errors:
         process = subprocess.Popen(command, cwd=cwd, env=env, stdout=output, stderr=errors,
                                    stdin=subprocess.DEVNULL)
-        deadline = time.monotonic() + timeout
         stopped = False
+        cleanup_deadline = None
         try:
+            # Inside the try, so a failure here cannot strand the child we just launched.
+            deadline = time.monotonic() + timeout
+            cleanup_deadline = max(deadline, time.monotonic()) + 5
+            def cleanup_budget():
+                return max(0.001, cleanup_deadline - time.monotonic())
+            def settle():
+                try:
+                    return _stop(process, cleanup_budget())
+                except OSError:
+                    return False
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    stopped = True
-                    try:
-                        _stop(process)
-                    except OSError:
-                        pass
+                    stopped = settle()
                     return None, True, False, b""
                 try:
                     code = process.wait(timeout=min(0.05, remaining))
                 except subprocess.TimeoutExpired:
                     if output.tell() > limit or errors.tell() > limit:
-                        stopped = True
-                        try:
-                            _stop(process)
-                        except OSError:
-                            pass
+                        stopped = settle()
                         return None, False, True, b""
                     continue
                 # A child that finished after the deadline still overran the bound.
@@ -124,13 +127,12 @@ def _run_bounded(command, cwd, env, timeout, limit):
             output.seek(0)
             return code, False, False, output.read()
         finally:
-            # Only reap here if a stop has not already been attempted, so the two waits
-            # cannot add up to two timeouts.
-            if not stopped:
-                stopped = True
+            # Retry only if the earlier attempt could not confirm the child was gone. Both
+            # attempts share one deadline, so they cannot stack into two timeouts.
+            if not stopped and process.poll() is None:
                 try:
-                    if process.poll() is None:
-                        _stop(process)
+                    _stop(process, 5.0 if cleanup_deadline is None else
+                          max(0.001, cleanup_deadline - time.monotonic()))
                 except OSError:
                     pass
 

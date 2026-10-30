@@ -249,7 +249,10 @@ class Wayfinder:
                     row['tier'] = self.tier(canonical)
                     if memory_resolved < budget:
                         memory_resolved += 1
+                        label = row.get('source_label')
                         row = self._canonical(canonical, 'mnemosyne', row['provenance'][0], terms)
+                        if label is not None:
+                            row['source_label'] = label
                         resolved += 1
                     else:
                         row['canonical_note_status'] = 'not_resolved'
@@ -262,6 +265,9 @@ class Wayfinder:
             key = row.get('path') or row['citation']
             if key in merged:
                 merged[key]['provenance'].extend(row['provenance'])
+                # Keep a label from any surviving backend record; the first row may be Markdown.
+                if row.get('source_label') and not merged[key].get('source_label'):
+                    merged[key]['source_label'] = row['source_label']
             else:
                 merged[key] = row
         rows = list(merged.values())
