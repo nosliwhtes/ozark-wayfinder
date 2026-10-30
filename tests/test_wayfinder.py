@@ -398,6 +398,56 @@ class RecallTests(unittest.TestCase):
         # Exactly the cap and nothing after it: not truncated.
         self.assertNotIn('code', reply['backends']['mnemosyne'])
 
+    def test_scan_cap_probe_is_a_single_row_statement(self):
+        import sqlite3, importlib
+        from unittest.mock import patch
+        backends = importlib.import_module('backends')
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
+            conn.executemany("INSERT INTO working_memory VALUES (?, 'solar', 'x', '{}', 'global', 's', NULL, '2000-01-01')",
+                             [(f'old-{i}',) for i in range(5001)])
+            conn.commit()
+        seen = []
+        real_connect = sqlite3.connect
+
+        def traced(*args, **kwargs):
+            connection = real_connect(*args, **kwargs)
+            connection.set_trace_callback(seen.append)
+            return connection
+
+        with patch.object(backends.sqlite3, 'connect', traced):
+            self.service(mnemosyne_db=database).recall('solar')
+        probes = [statement for statement in seen if statement.startswith('SELECT 1')]
+        self.assertEqual(len(probes), 1)
+        # sqlite expands bound parameters in the trace, so match the executed shape.
+        self.assertIn('LIMIT 1', probes[0])
+        self.assertIn('OFFSET 5000', probes[0])
+
+    def test_reaping_is_attempted_once_per_call(self):
+        import sys, importlib
+        from unittest.mock import patch
+        backends = importlib.import_module('backends')
+        (self.vault / 'a.md').write_text('solar')
+        workspace = self.root / 'qmd'
+        (workspace / 'config').mkdir(parents=True)
+        (workspace / 'index.sqlite3').touch()
+        (workspace / 'config/wayfinder.yml').write_text('collections: {}')
+        script = self.root / 'fake_qmd.py'
+        script.write_text('import time\ntime.sleep(1)\nprint("[]")\n')
+        calls = []
+
+        def failing(process):
+            calls.append(process)
+            raise OSError('kill refused')
+
+        with patch.object(backends, '_stop', failing):
+            reply = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script)),
+                                 qmd_timeout=0.05).recall('solar')
+        # The reason we stopped survives a failed kill, and only one 5s wait is attempted.
+        self.assertEqual(reply['backends']['qmd']['code'], 'timeout')
+        self.assertEqual(len(calls), 1)
+
     def test_row_cap_still_applies_to_live_rows(self):
         import sqlite3
         database = self.root / 'memory.sqlite3'

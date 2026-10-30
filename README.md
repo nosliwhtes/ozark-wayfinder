@@ -3,9 +3,10 @@
 Local, cited recall over your own Markdown knowledge — with optional read-only evidence from
 QMD and Mnemosyne — as a Hermes plugin.
 
-Wayfinder keeps your notes as the source of truth. Every hit is either a real file and line or a
-record citation, and curated notes always outrank imported ones. Nothing is captured
-automatically, nothing is uploaded, and a failed optional backend is reported instead of hidden.
+Wayfinder keeps your notes as the source of truth. Every hit is a real file and line, a record
+citation, or a record citation that also names the note it points at, and curated notes always
+outrank imported ones. Nothing is captured automatically, nothing is uploaded, and a failed
+optional backend is reported instead of hidden.
 
 ```
 wayfinder_recall      cited Markdown scan, optionally + QMD BM25 + Mnemosyne evidence
@@ -77,24 +78,25 @@ qmd --index wayfinder collection add /absolute/path/to/vault --name vault --mask
 
 Point `mnemosyne_db` at a SQLite file to add lexical evidence from `working_memory` and
 `episodic_memory`. Only global rows are read; expired, superseded and session-scoped rows are
-excluded. A record that names an existing `vault_note` resolves to that note; a record with no
-usable target stays a record citation, so a stale path can never force a foreign read.
+excluded. A record that names an existing `vault_note` is resolved to that note unless the
+per-backend read budget is already spent; a record with no usable target stays a record citation,
+so a stale path can never force a foreign read.
 
 ## What verification has shown
 
 Run from the project root, with the host interpreter for the host test:
 
 ```sh
-python -m unittest discover -s tests -v   # 36 tests, 0 failures
+python -m unittest discover -s tests -v   # 38 tests, 0 failures
 python tools/verify_host.py               # official doctor: 3 tools, 0 hooks
-python tools/verify_bootstrap.py          # clean-venv wheel install: 33 passed, 3 expected skips
+python tools/verify_bootstrap.py          # clean-venv wheel install: 35 passed, 3 expected skips
 ```
 
-- Default suite: **34 pass, 2 optional skips**. The suite includes a real `PluginManager`
+- Default suite: **36 pass, 2 optional skips**. The suite includes a real `PluginManager`
   discovery, scoped dispatch, checkpoint readback and unload in an isolated `HOME`/`HERMES_HOME`
   — no mocked plugin context.
 - `RUN_QMD_INTEGRATION=1 MNEMOSYNE_PYTHON=<interpreter-with-mnemosyne>` against a real QMD
-  binary and a real Mnemosyne database: **36/36, no skips**, all on synthetic data.
+  binary and a real Mnemosyne database: **38/38, no skips**, all on synthetic data.
 - Clean bootstrap builds and installs the wheel in a fresh venv with declared dependencies only.
 
 Both verification scripts stay inside the project and never enable the live profile.
@@ -102,8 +104,9 @@ Both verification scripts stay inside the project and never enable the live prof
 ## Guarantees and non-guarantees
 
 - Note text is untrusted data. The plugin never executes it and never installs backend code.
-- Recall is bounded; every result carries a citation, a source label and a tier. An empty matched
-  note is cited by path alone rather than a line number it does not have.
+- Recall is bounded; every result carries a citation and a tier, and memory results also carry
+  their source label. An empty matched note is cited by path alone rather than a line number it
+  does not have.
 - A disabled backend reports `disabled`; an enabled one that fails reports a structured error
   and marks the recall degraded while still returning canonical results. No synthetic success.
 - `checkpoint` previews by default, refuses overwrite, and verifies the persisted bytes.

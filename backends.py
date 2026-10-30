@@ -48,7 +48,7 @@ def _metadata(raw):
     return metadata
 
 
-def _live_rows(conn, sql, params):
+def _live_rows(conn, sql, probe, params):
     """Page through matches so a heap of expired rows cannot hide the ones after it.
 
     Faces a hard read cap as well, so an archive of expired matches is still bounded.
@@ -66,8 +66,7 @@ def _live_rows(conn, sql, params):
         if len(page) < PAGE_ROWS:
             break
     if scanned >= SCAN_ROWS:
-        # One-row existence probe: a further page would put the read cap over its number.
-        probe = sql.replace(f'LIMIT {PAGE_ROWS}', 'LIMIT 1')
+        # One-row existence probe, built by the caller: a further page would overrun the cap.
         return live, bool(list(conn.execute(probe, (*params, scanned))))
     return live, False
 
@@ -94,17 +93,26 @@ def _run_bounded(command, cwd, env, timeout, limit):
         process = subprocess.Popen(command, cwd=cwd, env=env, stdout=output, stderr=errors,
                                    stdin=subprocess.DEVNULL)
         deadline = time.monotonic() + timeout
+        stopped = False
         try:
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    _stop(process)
+                    stopped = True
+                    try:
+                        _stop(process)
+                    except OSError:
+                        pass
                     return None, True, False, b""
                 try:
                     code = process.wait(timeout=min(0.05, remaining))
                 except subprocess.TimeoutExpired:
                     if output.tell() > limit or errors.tell() > limit:
-                        _stop(process)
+                        stopped = True
+                        try:
+                            _stop(process)
+                        except OSError:
+                            pass
                         return None, False, True, b""
                     continue
                 # A child that finished after the deadline still overran the bound.
@@ -116,11 +124,15 @@ def _run_bounded(command, cwd, env, timeout, limit):
             output.seek(0)
             return code, False, False, output.read()
         finally:
-            try:
-                if process.poll() is None:
-                    _stop(process)
-            except OSError:
-                pass
+            # Only reap here if a stop has not already been attempted, so the two waits
+            # cannot add up to two timeouts.
+            if not stopped:
+                stopped = True
+                try:
+                    if process.poll() is None:
+                        _stop(process)
+                except OSError:
+                    pass
 
 
 def qmd_environment(workspace: Path) -> dict[str, str]:
@@ -196,8 +208,9 @@ def mnemosyne_search(settings, terms):
                 params = ['%' + t.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%' for t in terms]
                 # Expiry is filtered in Python, so the row cap has to be applied after it.
                 sql = f"SELECT id, content, source, metadata_json, valid_until FROM {table} WHERE scope = 'global' AND superseded_by IS NULL AND (" + ' OR '.join(clauses) + f') LIMIT {PAGE_ROWS} OFFSET ?'
+                probe = f"SELECT 1 FROM {table} WHERE scope = 'global' AND superseded_by IS NULL AND (" + ' OR '.join(clauses) + ') LIMIT 1 OFFSET ?'
                 try:
-                    live, cut_short = _live_rows(conn, sql, params)
+                    live, cut_short = _live_rows(conn, sql, probe, params)
                 except ValueError:
                     return failure('invalid_expiry')
                 if cut_short:
