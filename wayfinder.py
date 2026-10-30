@@ -128,10 +128,14 @@ class Wayfinder:
             note({'code': 'walk_error', 'detail': type(error).__name__})
         for root, dirs, files in os.walk(self.vault, followlinks=False, onerror=walk_error):
             dirs[:] = sorted(d for d in dirs if not d.startswith('.') and not (Path(root) / d).is_symlink())
+            # Directories cost a visit too: otherwise a huge tree is walked for free.
+            count += len(dirs)
+            if count > self.settings.max_files:
+                limited = True
+                break
             for name in sorted(files):
                 if not name.endswith('.md') or name.startswith('.') or (Path(root) / name).is_symlink():
                     continue
-                # Only candidate notes consume the budget; directories and other files are free.
                 if count >= self.settings.max_files:
                     limited = True
                     break
@@ -185,9 +189,11 @@ class Wayfinder:
             raise ValueError('query must contain words (max 2000 characters); limit must be 1..50')
         rows, status = self._markdown(terms)
         qmd, qmd_status = qmd_search(self.settings, query)
-        # Canonical re-reads are separate from the scan budget, so cap them too.
-        resolution_cap = min(limit * 2, 100)
-        for row in qmd[:resolution_cap]:
+        # Canonical re-reads are separate from the scan budget, so cap them — but keep every
+        # backend hit in the ranking rather than dropping the tail of the list.
+        budget = min(limit * 2, 100)
+        resolved = 0
+        for row in qmd:
             try:
                 uri = row['file']
                 if not isinstance(uri, str) or not uri.startswith('qmd://vault/'):
@@ -197,17 +203,29 @@ class Wayfinder:
                 if parsed.query not in ('', 'index=wayfinder') or parsed.fragment:
                     raise ValueError('unexpected QMD index or fragment')
                 relative = unquote(parsed.path.removeprefix('/'))
-                rows.append(self._canonical(relative, 'qmd', {'backend': 'qmd', 'citation': uri}, terms))
+                if resolved < budget:
+                    rows.append(self._canonical(relative, 'qmd', {'backend': 'qmd', 'citation': uri}, terms))
+                    resolved += 1
+                else:
+                    # Unread, but still a real hit with real provenance and its own tier.
+                    rows.append({'content': '', 'path': relative, 'line': 0, 'citation': uri,
+                                 'backend': 'qmd', 'tier': self.tier(relative), 'tier_rule': 'configured_roots',
+                                 'score': 0, 'provenance': [{'backend': 'qmd', 'citation': uri}],
+                                 'canonical_note_status': 'not_resolved'})
             except (ValueError, TypeError, KeyError, OSError, UnicodeError):
                 qmd_status = {'status': 'degraded', 'code': 'invalid_result'}
         memories, memory_status = mnemosyne_search(self.settings, terms)
-        for row in memories[:resolution_cap]:
+        for row in memories:
             canonical = row.pop('canonical_note')
             if canonical:
-                try:
-                    row = self._canonical(canonical, 'mnemosyne', row['provenance'][0], terms)
-                except (ValueError, TypeError, OSError, UnicodeError):
-                    row['canonical_note_status'] = 'invalid_or_missing'
+                if resolved < budget:
+                    try:
+                        row = self._canonical(canonical, 'mnemosyne', row['provenance'][0], terms)
+                        resolved += 1
+                    except (ValueError, TypeError, OSError, UnicodeError):
+                        row['canonical_note_status'] = 'invalid_or_missing'
+                else:
+                    row['canonical_note_status'] = 'not_resolved'
             rows.append(row)
         merged = {}
         for row in rows:
@@ -221,6 +239,7 @@ class Wayfinder:
                                  -len(r['provenance']), -r.get('score', 0), r['citation']))
         backends = {'markdown': status, 'qmd': qmd_status, 'mnemosyne': memory_status}
         return {'results': rows[:limit], 'backends': backends,
+                'resolution': {'budget': budget, 'resolved': resolved},
                 'degraded': any(s['status'] not in ('ok', 'disabled') for s in backends.values())}
 
     def checkpoint(self, path: str, title: str, summary: str, confirm: bool = False) -> dict:

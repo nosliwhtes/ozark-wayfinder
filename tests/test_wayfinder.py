@@ -195,6 +195,67 @@ class RecallTests(unittest.TestCase):
         self.assertNotIn('code', reply['backends']['mnemosyne'])
         self.assertEqual([r['citation'] for r in reply['results']], ['mnemosyne:working_memory:live'])
 
+    def test_expired_backlog_beyond_one_page_does_not_hide_live_rows(self):
+        """The page cap must not sit in front of the expiry filter."""
+        import sqlite3
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
+            conn.executemany("INSERT INTO working_memory VALUES (?, 'solar', 'x', '{}', 'global', 's', NULL, '2000-01-01')",
+                             [(f'old-{i}',) for i in range(501)])
+            conn.execute("INSERT INTO working_memory VALUES ('live', 'solar', 'x', '{}', 'global', 's', NULL, NULL)")
+            conn.commit()
+        reply = self.service(mnemosyne_db=database).recall('solar')
+        self.assertNotIn('code', reply['backends']['mnemosyne'])
+        self.assertIn('mnemosyne:working_memory:live', [r['citation'] for r in reply['results']])
+
+    def test_numeric_metadata_is_accepted_and_non_object_is_classified(self):
+        import sqlite3
+        # A bare scalar and a list are both non-objects, and both are metadata errors, not
+        # generic database errors.
+        cases = (('{"a": 1}', 'ok'), (7, 'invalid_metadata'), ('[1, 2]', 'invalid_metadata'))
+        for index, (value, expected) in enumerate(cases):
+            database = self.root / f'meta-{index}.sqlite3'
+            with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+                conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
+                conn.execute("INSERT INTO working_memory VALUES ('m', 'solar', 'x', ?, 'global', 's', NULL, NULL)", (value,))
+                conn.commit()
+            reply = self.service(mnemosyne_db=database).recall('solar')
+            self.assertEqual(reply['backends']['mnemosyne'].get('code', 'ok'), expected)
+
+    def test_resolution_budget_keeps_unresolved_hits_in_the_ranking(self):
+        import sys
+        (self.vault / 'curated').mkdir()
+        for index in range(6):
+            (self.vault / f'curated/n{index}.md').write_text('solar note')
+        workspace = self.root / 'qmd'
+        (workspace / 'config').mkdir(parents=True)
+        (workspace / 'index.sqlite3').touch()
+        (workspace / 'config/wayfinder.yml').write_text('collections: {}')
+        script = self.root / 'fake_qmd.py'
+        hits = [{'file': f'qmd://vault/curated/n{i}.md'} for i in range(6)]
+        script.write_text('import json\nprint(json.dumps(%r))\n' % (hits,))
+        service = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script)))
+        reply = service.recall('solar', 1)
+        # Truncation is reported, and the row that survived is fully resolved rather than gutted.
+        self.assertEqual(reply['resolution'], {'budget': 2, 'resolved': 2})
+        self.assertEqual(len(reply['results']), 1)
+        self.assertEqual(reply['results'][0]['citation'], 'curated/n0.md:1')
+        # A wider limit resolves everything, so no hit is lost from the candidate pool.
+        self.assertEqual(service.recall('solar', 8)['resolution'], {'budget': 16, 'resolved': 6})
+
+    def test_fast_stderr_overflow_is_reported(self):
+        import sys
+        (self.vault / 'a.md').write_text('solar')
+        workspace = self.root / 'qmd'
+        (workspace / 'config').mkdir(parents=True)
+        (workspace / 'index.sqlite3').touch()
+        (workspace / 'config/wayfinder.yml').write_text('collections: {}')
+        script = self.root / 'fake_qmd.py'
+        script.write_text('import sys\nsys.stderr.write("x" * 2200000)\nprint("[]")\n')
+        reply = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script))).recall('solar')
+        self.assertEqual(reply['backends']['qmd']['code'], 'output_limit')
+
     def test_row_cap_still_applies_to_live_rows(self):
         import sqlite3
         database = self.root / 'memory.sqlite3'
@@ -223,14 +284,39 @@ class RecallTests(unittest.TestCase):
         self.assertIn('may exist', str(caught.exception))
         self.assertIn('readback failed', str(caught.exception))
 
-    def test_scan_budget_counts_only_candidate_notes(self):
+    def test_scan_budget_counts_directories_and_candidate_notes(self):
         for i in range(30):
             (self.vault / f'dir{i}').mkdir()
         (self.vault / 'a.md').write_text('solar')
-        self.assertNotIn('code', self.service(max_files=2).recall('solar')['backends']['markdown'])
+        # 30 directories alone overrun a budget of 20, so the walk is genuinely bounded.
+        self.assertEqual(self.service(max_files=20).recall('solar')['backends']['markdown']['code'], 'scan_limit')
+        self.assertNotIn('code', self.service(max_files=40).recall('solar')['backends']['markdown'])
         (self.vault / 'b.md').write_text('solar')
-        (self.vault / 'c.md').write_text('solar')
-        self.assertEqual(self.service(max_files=2).recall('solar')['backends']['markdown']['code'], 'scan_limit')
+        self.assertEqual(self.service(max_files=31).recall('solar')['backends']['markdown']['code'], 'scan_limit')
+
+    def test_plugin_reports_readback_mismatch_as_verification_failed(self):
+        import json, sys, shutil, importlib
+        from unittest.mock import patch
+        # Load the plugin the way the loader does: as a package, so relative imports work.
+        package = self.root / 'wf_plugin'
+        package.mkdir()
+        for name in ('__init__.py', 'wayfinder.py', 'backends.py', 'plugin.yaml'):
+            shutil.copyfile(Path(__file__).resolve().parents[1] / name, package / name)
+        sys.path.insert(0, str(self.root))
+        self.addCleanup(sys.path.remove, str(self.root))
+        plugin = importlib.import_module('wf_plugin')
+        plugin_wayfinder = importlib.import_module('wf_plugin.wayfinder')
+
+        class Context:
+            def get_config(self, name, default=None):
+                return str(self.vault) if name == 'vault_root' else default
+
+        context = Context()
+        context.vault = self.vault
+        with patch.object(plugin_wayfinder.Wayfinder, '_read', return_value='wrong bytes'):
+            result = json.loads(plugin._handle(context, 'checkpoint',
+                                               {'path': 'a.md', 'title': 'T', 'summary': 'S', 'confirm': True}))
+        self.assertEqual(result['error']['code'], 'verification_failed')
 
     def test_scan_settings_are_integers_and_small_checkpoint_is_rejected_before_write(self):
         for config in ({'max_files': True}, {'max_file_bytes': 1.5}, {'qmd_timeout': True}):

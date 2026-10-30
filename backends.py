@@ -11,6 +11,8 @@ import time
 
 OUTPUT_LIMIT = 2 * 1024 * 1024
 ROW_LIMIT = 500
+SCAN_ROWS = 5000
+PAGE_ROWS = 200
 
 
 def failure(code):
@@ -33,10 +35,36 @@ def expired(value) -> bool:
 
 
 def _metadata(raw):
-    metadata = json.loads(raw or '{}')
+    if raw is None or raw == '':
+        return {}
+    if isinstance(raw, bytes):
+        raw = raw.decode('utf-8')
+    if not isinstance(raw, str):
+        # SQLite is loosely typed; a numeric metadata_json is still usable.
+        raw = str(raw)
+    metadata = json.loads(raw)
     if not isinstance(metadata, dict):
         raise ValueError('metadata must be an object')
     return metadata
+
+
+def _live_rows(conn, sql, params):
+    """Page through matches so a heap of expired rows cannot hide the ones after it.
+
+    Faces a hard read cap as well, so an archive of expired matches is still bounded.
+    """
+    live, scanned = [], 0
+    offset = 0
+    while len(live) <= ROW_LIMIT and scanned < SCAN_ROWS:
+        page = list(conn.execute(sql, (*params, offset)))
+        if not page:
+            break
+        scanned += len(page)
+        offset += len(page)
+        live.extend(row for row in page if not expired(row['valid_until']))
+        if len(page) < PAGE_ROWS:
+            break
+    return live
 
 
 def _run_bounded(command, cwd, env, timeout, limit):
@@ -51,19 +79,24 @@ def _run_bounded(command, cwd, env, timeout, limit):
         deadline = time.monotonic() + timeout
         try:
             while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    process.kill()
+                    process.wait()
+                    return None, True, False, b""
                 try:
-                    code = process.wait(timeout=0.05)
-                    break
+                    code = process.wait(timeout=min(0.05, remaining))
                 except subprocess.TimeoutExpired:
                     if output.tell() > limit or errors.tell() > limit:
                         process.kill()
                         process.wait()
                         return None, False, True, b""
-                    if time.monotonic() > deadline:
-                        process.kill()
-                        process.wait()
-                        return None, True, False, b""
-            if output.tell() > limit:
+                    continue
+                # A child that finished after the deadline still overran the bound.
+                if time.monotonic() > deadline:
+                    return None, True, False, b""
+                break
+            if output.tell() > limit or errors.tell() > limit:
                 return code, False, True, b""
             output.seek(0)
             return code, False, False, output.read()
@@ -144,9 +177,9 @@ def mnemosyne_search(settings, terms):
                 clauses = ['LOWER(content) LIKE ? ESCAPE \'\\\'' for _ in terms]
                 params = ['%' + t.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%' for t in terms]
                 # Expiry is filtered in Python, so the row cap has to be applied after it.
-                sql = f"SELECT id, content, source, metadata_json, valid_until FROM {table} WHERE scope = 'global' AND superseded_by IS NULL AND (" + ' OR '.join(clauses) + f') LIMIT {ROW_LIMIT + 1}'
+                sql = f"SELECT id, content, source, metadata_json, valid_until FROM {table} WHERE scope = 'global' AND superseded_by IS NULL AND (" + ' OR '.join(clauses) + f') LIMIT {PAGE_ROWS} OFFSET ?'
                 try:
-                    live = [row for row in conn.execute(sql, params) if not expired(row['valid_until'])]
+                    live = _live_rows(conn, sql, params)
                 except ValueError:
                     return failure('invalid_expiry')
                 if len(live) > ROW_LIMIT:
@@ -154,7 +187,7 @@ def mnemosyne_search(settings, terms):
                 for row in live:
                     try:
                         metadata = _metadata(row['metadata_json'])
-                    except (ValueError, json.JSONDecodeError):
+                    except (ValueError, TypeError, json.JSONDecodeError, UnicodeError):
                         return failure('invalid_metadata')
                     citation = f"mnemosyne:{table}:{row['id']}"
                     rows.append({'content': str(row['content'])[:800], 'citation': citation,
