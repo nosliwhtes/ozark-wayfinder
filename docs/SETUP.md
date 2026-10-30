@@ -39,7 +39,9 @@ security sandbox — read the code first. It is not proof of activation on the l
 
 Run against disposable state and synthetic notes only. Require, per point, actual output:
 
-- `wayfinder_health` reports the vault present and every unconfigured backend `disabled`.
+- `wayfinder_health` reports the vault present and every unconfigured backend `disabled`, and
+  reports a structured error for a backend that is configured but broken (try `qmd_command` of
+  `/bin/false`) instead of `ok`.
 - `wayfinder_recall` returns synthetic hits with `path:line` citations and tiers, curated first.
 - A query in a note outside both tier prefixes still returns, between curated and imported.
 - `wayfinder_checkpoint` previews without writing; `confirm=true` writes and reports `verified`;

@@ -16,8 +16,9 @@ It makes no network call itself, installs nothing, and never executes note text.
 - Note text flows back to whichever model reads the session. Local storage is not confidentiality.
 - Mnemosyne is read as SQLite evidence only. Pointing the plugin at a database lets it read
   matching global rows from it.
-- Path guards reject `../` traversal, hidden directories and symlinked directories. Symlinked
-  *files* are read as their target.
+- Path guards reject `../` traversal and hidden components, and every open uses `O_NOFOLLOW`.
+  Symlinked directories are pruned from scans, and symlinked *files* are skipped too — a note is
+  only reachable through real directories and real files under `vault_root`.
 - There is no encryption, secret scanning, sandbox, rate limit or audit log.
 
 ## Reporting

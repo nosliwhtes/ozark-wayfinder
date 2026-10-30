@@ -10,7 +10,7 @@ automatically, nothing is uploaded, and a failed optional backend is reported in
 ```
 wayfinder_recall      cited Markdown scan, optionally + QMD BM25 + Mnemosyne evidence
 wayfinder_checkpoint  preview-first, create-only Markdown note with byte readback
-wayfinder_health      local presence checks for the vault and optional backends
+wayfinder_health      one bounded local probe per component, never a download
 ```
 
 Requires Hermes with the v2 plugin contract, Python >= 3.11 and POSIX filesystem APIs.
@@ -52,7 +52,7 @@ Settings live under `plugins.entries.ozark-wayfinder.settings`.
 | `vault_root` | — | Required existing absolute vault directory |
 | `curated_roots` | `["curated"]` | Relative prefixes sorted first |
 | `imported_roots` | `["imports", "sources"]` | Relative prefixes sorted last; must not overlap curated |
-| `max_files` | `5000` | Scan traversal budget |
+| `max_files` | `5000` | Candidate `.md` notes read; directories are free |
 | `max_file_bytes` | `1048576` | Per-file read and write limit |
 | `mnemosyne_db` | off | Absolute SQLite path, opened `mode=ro` with `query_only` |
 | `qmd_workspace` | off | Absolute dedicated QMD workspace |
@@ -85,16 +85,16 @@ unlinked memory hit, so a stale path can never force a foreign read.
 Run from the project root, with the host interpreter for the host test:
 
 ```sh
-python -m unittest discover -s tests -v   # 16 tests, 0 failures
+python -m unittest discover -s tests -v   # 24 tests, 0 failures
 python tools/verify_host.py               # official doctor: 3 tools, 0 hooks
-python tools/verify_bootstrap.py          # clean-venv wheel install: 13 passed, 3 expected skips
+python tools/verify_bootstrap.py          # clean-venv wheel install: 21 passed, 3 expected skips
 ```
 
-- Default suite: **14 pass, 2 optional skips**. The suite includes a real `PluginManager`
+- Default suite: **22 pass, 2 optional skips**. The suite includes a real `PluginManager`
   discovery, scoped dispatch, checkpoint readback and unload in an isolated `HOME`/`HERMES_HOME`
   — no mocked plugin context.
 - `RUN_QMD_INTEGRATION=1 MNEMOSYNE_PYTHON=<interpreter-with-mnemosyne>` against a real QMD
-  binary and a real Mnemosyne database: **16/16, no skips**, all on synthetic data.
+  binary and a real Mnemosyne database: **24/24, no skips**, all on synthetic data.
 - Clean bootstrap builds and installs the wheel in a fresh venv with declared dependencies only.
 
 Both verification scripts stay inside the project and never enable the live profile.
@@ -102,12 +102,13 @@ Both verification scripts stay inside the project and never enable the live prof
 ## Guarantees and non-guarantees
 
 - Note text is untrusted data. The plugin never executes it and never installs backend code.
-- Recall is bounded; every result carries a citation, a source label and a tier.
+- Recall is bounded; every result carries a citation, a source label and a tier. An empty matched
+  note is cited by path alone rather than a line number it does not have.
 - A disabled backend reports `disabled`; an enabled one that fails reports a structured error
   and marks the recall degraded while still returning canonical results. No synthetic success.
 - `checkpoint` previews by default, refuses overwrite, and verifies the persisted bytes.
-- `health` proves local configuration/presence only — not query availability, schema
-  compatibility or index freshness. Recall reports those when actually exercised.
+- `health` runs one fixed-term probe per enabled component and reports `disabled`, `ok` or a
+  structured error. It does not grade result quality, schema compatibility or index freshness.
 - No encryption, secret detection, capture, vector/graph recall, indexing, promotion queue,
   edit/forget API, backup, migration, or sandbox. QMD can reach whatever the OS permits.
 

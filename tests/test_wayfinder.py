@@ -141,6 +141,97 @@ class RecallTests(unittest.TestCase):
         self.assertTrue(reply['degraded'])
         self.assertEqual(reply['backends']['markdown']['errors'][0]['code'], 'walk_error')
 
+    def test_tier_order_is_total_and_curated_wins(self):
+        """All four tiers must be strictly ordered, not merely curated-first."""
+        import sqlite3
+        for name in ('curated', 'imports', 'other'):
+            (self.vault / name).mkdir()
+        for name in ('curated/a.md', 'other/b.md', 'imports/c.md'):
+            (self.vault / name).write_text('solar\n')
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id TEXT, content TEXT, source TEXT, metadata_json TEXT, scope TEXT, session_id TEXT, superseded_by TEXT, valid_until TEXT)')
+            conn.execute("INSERT INTO working_memory VALUES ('m', 'solar', 'conversation', '{}', 'global', 's', NULL, NULL)")
+            conn.commit()
+        reply = self.service(mnemosyne_db=database).recall('solar')
+        self.assertEqual([r['tier'] for r in reply['results']],
+                         ['curated', 'unclassified', 'episodic', 'imported'])
+
+    def test_empty_canonical_note_is_cited_by_path_only(self):
+        import sqlite3
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id TEXT, content TEXT, source TEXT, metadata_json TEXT, scope TEXT, session_id TEXT, superseded_by TEXT, valid_until TEXT)')
+            conn.execute("INSERT INTO working_memory VALUES ('e', 'solar', 'x', '{\"vault_note\":\"empty.md\"}', 'global', 's', NULL, NULL)")
+            conn.commit()
+        (self.vault / 'empty.md').write_text('')
+        row = self.service(mnemosyne_db=database).recall('solar')['results'][0]
+        self.assertEqual(row['citation'], 'empty.md')
+        self.assertEqual(row['line'], 0)
+        self.assertEqual(row['content'], '')
+
+    def test_malformed_valid_until_degrades_instead_of_raising(self):
+        import sqlite3
+        # Untyped column, so SQLite keeps the storage class: SQLite is loosely typed in practice.
+        cases = ((20260101, 'ok'), (b'2030-01-01', 'invalid_expiry'), ('whenever', 'invalid_expiry'))
+        for index, (value, expected) in enumerate(cases):
+            database = self.root / f'memory-{index}.sqlite3'
+            with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+                conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
+                conn.execute("INSERT INTO working_memory VALUES ('m', 'solar', 'x', '{}', 'global', 's', NULL, ?)", (value,))
+                conn.commit()
+            reply = self.service(mnemosyne_db=database).recall('solar')
+            self.assertEqual(reply['backends']['mnemosyne'].get('code', 'ok'), expected)
+
+    def test_expired_rows_do_not_consume_the_row_cap(self):
+        import sqlite3
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id TEXT, content TEXT, source TEXT, metadata_json TEXT, scope TEXT, session_id TEXT, superseded_by TEXT, valid_until TEXT)')
+            conn.executemany("INSERT INTO working_memory VALUES (?, 'solar', 'x', '{}', 'global', 's', NULL, ?)",
+                             [(f'old-{i}', '2000-01-01') for i in range(120)] + [('live', None)])
+            conn.commit()
+        reply = self.service(mnemosyne_db=database).recall('solar')
+        self.assertNotIn('code', reply['backends']['mnemosyne'])
+        self.assertEqual([r['citation'] for r in reply['results']], ['mnemosyne:working_memory:live'])
+
+    def test_row_cap_still_applies_to_live_rows(self):
+        import sqlite3
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id TEXT, content TEXT, source TEXT, metadata_json TEXT, scope TEXT, session_id TEXT, superseded_by TEXT, valid_until TEXT)')
+            conn.executemany("INSERT INTO working_memory VALUES (?, 'solar', 'x', '{}', 'global', 's', NULL, NULL)",
+                             [(f'id-{i}',) for i in range(501)])
+            conn.commit()
+        reply = self.service(mnemosyne_db=database).recall('solar')
+        self.assertEqual(reply['backends']['mnemosyne']['code'], 'result_limit')
+
+    def test_title_and_summary_maximums(self):
+        service = self.service()
+        self.assertEqual(service.checkpoint('a.md', 't' * 200, 's' * 4000)['status'], 'preview')
+        for title, summary in (('t' * 201, 'ok'), ('t', 's' * 4001), ('two\nlines', 'ok'), ('   ', 'ok')):
+            with self.assertRaises(ValueError):
+                service.checkpoint('a.md', title, summary)
+
+    def test_readback_failure_reports_verification_not_plain_filesystem(self):
+        service = self.service()
+        from unittest.mock import patch
+        from wayfinder import Wayfinder
+        with patch.object(Wayfinder, '_read', side_effect=OSError('gone')):
+            with self.assertRaises(RuntimeError) as caught:
+                service.checkpoint('a.md', 'Title', 'Summary', confirm=True)
+        self.assertIn('may exist', str(caught.exception))
+        self.assertIn('readback failed', str(caught.exception))
+
+    def test_scan_budget_counts_only_candidate_notes(self):
+        for i in range(30):
+            (self.vault / f'dir{i}').mkdir()
+        (self.vault / 'a.md').write_text('solar')
+        self.assertNotIn('code', self.service(max_files=2).recall('solar')['backends']['markdown'])
+        (self.vault / 'b.md').write_text('solar')
+        (self.vault / 'c.md').write_text('solar')
+        self.assertEqual(self.service(max_files=2).recall('solar')['backends']['markdown']['code'], 'scan_limit')
+
     def test_scan_settings_are_integers_and_small_checkpoint_is_rejected_before_write(self):
         for config in ({'max_files': True}, {'max_file_bytes': 1.5}, {'qmd_timeout': True}):
             with self.assertRaises(ValueError):
@@ -160,8 +251,18 @@ class RecallTests(unittest.TestCase):
         (workspace / 'index.sqlite3').touch()
         (workspace / 'config/wayfinder.yml').write_text('collections: {}')
         script = self.root / 'fake_qmd.py'
-        script.write_text('import os,sys,json\nassert os.environ["HOME"] != os.path.expanduser("~invalid")\nassert "TEST_SECRET" not in os.environ\nassert os.environ["INDEX_PATH"].endswith("index.sqlite3")\nassert "search" in sys.argv and "-c" in sys.argv\nprint(json.dumps([{"file":"qmd://vault/curated/a.md","score":0.7,"snippet":"solar note"}]))\n')
-        service = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script)))
+        script.write_text(
+            'import os,sys,json\n'
+            'workspace = sys.argv[1]\n'
+            # HOME and HERMES_HOME must be the isolated workspace, not the invoking profile.
+            'assert os.environ["HOME"] == workspace + "/home", os.environ["HOME"]\n'
+            'assert os.environ["HERMES_HOME"] == workspace + "/hermes", os.environ["HERMES_HOME"]\n'
+            'assert os.environ["INDEX_PATH"] == workspace + "/index.sqlite3", os.environ["INDEX_PATH"]\n'
+            'assert "TEST_SECRET" not in os.environ\n'
+            'assert "search" in sys.argv and "-c" in sys.argv\n'
+            'print(json.dumps([{"file":"qmd://vault/curated/a.md","score":0.7,"snippet":"solar note"}]))\n')
+        command = (sys.executable, str(script), str(workspace))
+        service = self.service(qmd_workspace=workspace, qmd_command=command)
         from unittest.mock import patch
         with patch.dict('os.environ', {'TEST_SECRET': 'should-not-be-inherited', 'INDEX_PATH': '/not-used'}):
             reply = service.recall('solar')
@@ -170,6 +271,7 @@ class RecallTests(unittest.TestCase):
         self.assertEqual({p['backend'] for p in reply['results'][0]['provenance']}, {'markdown', 'qmd'})
         for code, body in [('invalid_json', 'print("broken")'), ('process_failed', 'raise SystemExit(2)'),
                            ('timeout', 'import time; time.sleep(1)'),
+                           ('output_limit', 'print("x" * 2200000)'),
                            ('invalid_result', 'print(\'[{"file":"qmd://vault/../outside.md"}]\')')]:
             script.write_text(body)
             reply = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script)), qmd_timeout=0.05 if code == 'timeout' else 3).recall('solar')

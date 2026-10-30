@@ -16,6 +16,8 @@ if __package__:
 else:
     from backends import mnemosyne_search, qmd_search
 
+MAX_ERRORS = 20
+
 
 def relative_path(value: str, markdown: bool = False) -> PurePosixPath:
     if not isinstance(value, str) or not value or '\\' in value or any(ord(c) < 32 for c in value):
@@ -119,23 +121,26 @@ class Wayfinder:
     def _markdown(self, terms: list[str]) -> tuple[list[dict], dict]:
         rows, errors, count = [], [], 0
         limited = False
+        def note(entry):
+            if len(errors) < MAX_ERRORS:
+                errors.append(entry)
         def walk_error(error):
-            errors.append({'code': 'walk_error', 'detail': type(error).__name__})
+            note({'code': 'walk_error', 'detail': type(error).__name__})
         for root, dirs, files in os.walk(self.vault, followlinks=False, onerror=walk_error):
             dirs[:] = sorted(d for d in dirs if not d.startswith('.') and not (Path(root) / d).is_symlink())
-            count += len(dirs)
             for name in sorted(files):
                 if not name.endswith('.md') or name.startswith('.') or (Path(root) / name).is_symlink():
                     continue
-                count += 1
-                if count > self.settings.max_files:
+                # Only candidate notes consume the budget; directories and other files are free.
+                if count >= self.settings.max_files:
                     limited = True
                     break
+                count += 1
                 rel = (Path(root) / name).relative_to(self.vault).as_posix()
                 try:
                     text = self._read(rel)
                 except (OSError, ValueError, UnicodeError) as exc:
-                    errors.append({'path': rel, 'code': type(exc).__name__})
+                    note({'path': rel, 'code': type(exc).__name__})
                     continue
                 matched = [(n, line) for n, line in enumerate(text.splitlines(), 1)
                            if any(t in line.casefold() for t in terms)]
@@ -146,12 +151,13 @@ class Wayfinder:
                                  'backend': 'markdown', 'tier': self.tier(rel), 'tier_rule': 'configured_roots',
                                  'score': sum(text.casefold().count(t) for t in terms),
                                  'provenance': [{'backend': 'markdown', 'citation': citation}]})
-            if limited or count > self.settings.max_files:
-                limited = True
+            if limited:
                 break
         status = {'status': 'degraded' if errors or limited else 'ok', 'errors': errors}
         if limited:
             status['code'] = 'scan_limit'
+        if len(errors) >= MAX_ERRORS:
+            status['errors_truncated'] = True
         return rows, status
 
     def health(self) -> dict:
@@ -164,9 +170,10 @@ class Wayfinder:
         relative_path(relative, markdown=True)
         text = self._read(relative)
         lines = text.splitlines()
-        number = next((n for n, line in enumerate(lines, 1) if any(t in line.casefold() for t in terms)), 1)
-        citation = f'{relative}:{number}'
-        return {'content': lines[number - 1][:800] if lines else '', 'path': relative, 'line': number,
+        # An empty note has no line 1, so it is cited by path alone rather than falsely.
+        number = next((n for n, line in enumerate(lines, 1) if any(t in line.casefold() for t in terms)), 1 if lines else 0)
+        citation = f'{relative}:{number}' if number else relative
+        return {'content': lines[number - 1][:800] if number else '', 'path': relative, 'line': number,
                 'citation': citation, 'backend': backend, 'tier': self.tier(relative), 'tier_rule': 'configured_roots',
                 'score': 0, 'provenance': [provenance]}
 
@@ -178,7 +185,9 @@ class Wayfinder:
             raise ValueError('query must contain words (max 2000 characters); limit must be 1..50')
         rows, status = self._markdown(terms)
         qmd, qmd_status = qmd_search(self.settings, query)
-        for row in qmd:
+        # Canonical re-reads are separate from the scan budget, so cap them too.
+        resolution_cap = min(limit * 2, 100)
+        for row in qmd[:resolution_cap]:
             try:
                 uri = row['file']
                 if not isinstance(uri, str) or not uri.startswith('qmd://vault/'):
@@ -192,7 +201,7 @@ class Wayfinder:
             except (ValueError, TypeError, KeyError, OSError, UnicodeError):
                 qmd_status = {'status': 'degraded', 'code': 'invalid_result'}
         memories, memory_status = mnemosyne_search(self.settings, terms)
-        for row in memories:
+        for row in memories[:resolution_cap]:
             canonical = row.pop('canonical_note')
             if canonical:
                 try:
@@ -253,6 +262,12 @@ class Wayfinder:
                     os.unlink(staging, dir_fd=parent)
                 except FileNotFoundError:
                     pass
-        if self._read(path) != content:
-            raise RuntimeError('checkpoint published but readback failed; inspect target before retrying')
+        try:
+            persisted = self._read(path)
+        except (OSError, ValueError, UnicodeError) as exc:
+            # The note may well exist; do not let this read as a plain filesystem error.
+            raise RuntimeError('checkpoint may exist but readback failed (%s); inspect target before retrying'
+                               % type(exc).__name__) from exc
+        if persisted != content:
+            raise RuntimeError('checkpoint published but bytes differ on readback; inspect target before retrying')
         return {**result, 'status': 'created', 'verified': True, 'sha256': hashlib.sha256(raw).hexdigest()}

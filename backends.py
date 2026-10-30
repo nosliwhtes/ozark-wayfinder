@@ -7,10 +7,70 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import tempfile
+import time
+
+OUTPUT_LIMIT = 2 * 1024 * 1024
+ROW_LIMIT = 500
 
 
 def failure(code):
     return [], {'status': 'error', 'code': code}
+
+
+def expired(value) -> bool:
+    """True when a row is past its validity. Raises ValueError on an unparseable value.
+
+    SQLite is loosely typed, so a non-text ``valid_until`` is coerced rather than trusted.
+    """
+    if value is None or value == '':
+        return False
+    if not isinstance(value, str):
+        value = str(value)
+    expiry = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return expiry <= datetime.now(timezone.utc)
+
+
+def _metadata(raw):
+    metadata = json.loads(raw or '{}')
+    if not isinstance(metadata, dict):
+        raise ValueError('metadata must be an object')
+    return metadata
+
+
+def _run_bounded(command, cwd, env, timeout, limit):
+    """Run without a shell, killing the child if it outruns either bound.
+
+    Output goes to temp files, so disk use is capped by polling rather than by RAM.
+    Returns (returncode | None, timed_out, over_limit, stdout_bytes).
+    """
+    with tempfile.TemporaryFile(dir=cwd) as output, tempfile.TemporaryFile(dir=cwd) as errors:
+        process = subprocess.Popen(command, cwd=cwd, env=env, stdout=output, stderr=errors,
+                                   stdin=subprocess.DEVNULL)
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                try:
+                    code = process.wait(timeout=0.05)
+                    break
+                except subprocess.TimeoutExpired:
+                    if output.tell() > limit or errors.tell() > limit:
+                        process.kill()
+                        process.wait()
+                        return None, False, True, b""
+                    if time.monotonic() > deadline:
+                        process.kill()
+                        process.wait()
+                        return None, True, False, b""
+            if output.tell() > limit:
+                return code, False, True, b""
+            output.seek(0)
+            return code, False, False, output.read()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
 
 
 def qmd_environment(workspace: Path) -> dict[str, str]:
@@ -33,22 +93,20 @@ def qmd_search(settings, query):
         return failure('symlink_state')
     command = list(settings.qmd_command) + ['--index', 'wayfinder', 'search', query, '-c', 'vault', '--json', '-n', '50']
     try:
-        # Spool bounded output outside RAM; QMD is a user-chosen trusted local executable.
-        with tempfile.TemporaryFile(dir=root) as output, tempfile.TemporaryFile(dir=root) as errors:
-            reply = subprocess.run(command, cwd=root, env=qmd_environment(root), stdout=output,
-                                   stderr=errors, timeout=settings.qmd_timeout, check=False)
-            if reply.returncode:
-                return failure('process_failed')
-            if output.tell() > 2 * 1024 * 1024:
-                return failure('output_limit')
-            output.seek(0)
-            data = json.loads(output.read())
+        # QMD is a user-chosen trusted local executable; both streams are bounded while running.
+        code, timed_out, over_limit, raw = _run_bounded(command, root, qmd_environment(root),
+                                                        settings.qmd_timeout, OUTPUT_LIMIT)
+        if over_limit:
+            return failure('output_limit')
+        if timed_out:
+            return failure('timeout')
+        if code:
+            return failure('process_failed')
+        data = json.loads(raw)
         # Current QMD emits [] or an empty object for no matches; accept only documented list shape.
         if not isinstance(data, list) or len(data) > 1000:
             return failure('invalid_result')
         return data, {'status': 'ok', 'mode': 'bm25_local'}
-    except subprocess.TimeoutExpired:
-        return failure('timeout')
     except (json.JSONDecodeError, UnicodeError):
         return failure('invalid_json')
     except OSError:
@@ -85,22 +143,18 @@ def mnemosyne_search(settings, terms):
                 usable += 1
                 clauses = ['LOWER(content) LIKE ? ESCAPE \'\\\'' for _ in terms]
                 params = ['%' + t.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%' for t in terms]
-                sql = f"SELECT id, content, source, metadata_json, valid_until FROM {table} WHERE scope = 'global' AND superseded_by IS NULL AND (" + ' OR '.join(clauses) + ') LIMIT 101'
-                matched = list(conn.execute(sql, params))
-                if len(matched) > 100:
+                # Expiry is filtered in Python, so the row cap has to be applied after it.
+                sql = f"SELECT id, content, source, metadata_json, valid_until FROM {table} WHERE scope = 'global' AND superseded_by IS NULL AND (" + ' OR '.join(clauses) + f') LIMIT {ROW_LIMIT + 1}'
+                try:
+                    live = [row for row in conn.execute(sql, params) if not expired(row['valid_until'])]
+                except ValueError:
+                    return failure('invalid_expiry')
+                if len(live) > ROW_LIMIT:
                     return failure('result_limit')
-                for row in matched:
-                    if row['valid_until']:
-                        try:
-                            expiry = datetime.fromisoformat(row['valid_until'].replace('Z', '+00:00'))
-                            if expiry.tzinfo is None:
-                                expiry = expiry.replace(tzinfo=timezone.utc)
-                            if expiry <= datetime.now(timezone.utc):
-                                continue
-                        except (ValueError, TypeError):
-                            return failure('invalid_expiry')
-                    metadata = json.loads(row['metadata_json'] or '{}')
-                    if not isinstance(metadata, dict):
+                for row in live:
+                    try:
+                        metadata = _metadata(row['metadata_json'])
+                    except (ValueError, json.JSONDecodeError):
                         return failure('invalid_metadata')
                     citation = f"mnemosyne:{table}:{row['id']}"
                     rows.append({'content': str(row['content'])[:800], 'citation': citation,
@@ -112,5 +166,5 @@ def mnemosyne_search(settings, terms):
         return rows, {'status': 'ok', 'mode': 'readonly_sqlite_global_literal'}
     except sqlite3.OperationalError:
         return failure('database_busy_invalid_or_query_budget')
-    except (sqlite3.DatabaseError, ValueError, TypeError):
+    except (sqlite3.DatabaseError, ValueError, TypeError, AttributeError, KeyError):
         return failure('invalid_database_or_metadata')
