@@ -256,6 +256,34 @@ class RecallTests(unittest.TestCase):
         reply = self.service(qmd_workspace=workspace, qmd_command=(sys.executable, str(script))).recall('solar')
         self.assertEqual(reply['backends']['qmd']['code'], 'output_limit')
 
+    def test_each_backend_resolves_within_its_own_budget(self):
+        """A long QMD list must not consume the budget memory needs."""
+        import sys, sqlite3
+        (self.vault / 'curated').mkdir()
+        (self.vault / 'curated/linked.md').write_text('solar note')
+        for index in range(20):
+            (self.vault / f'curated/q{index}.md').write_text('solar note')
+        workspace = self.root / 'qmd'
+        (workspace / 'config').mkdir(parents=True)
+        (workspace / 'index.sqlite3').touch()
+        (workspace / 'config/wayfinder.yml').write_text('collections: {}')
+        hits = [{'file': f'qmd://vault/curated/q{i}.md'} for i in range(20)]
+        script = self.root / 'fake_qmd.py'
+        script.write_text('import json\nprint(json.dumps(%r))\n' % (hits,))
+        database = self.root / 'memory.sqlite3'
+        with __import__('contextlib').closing(sqlite3.connect(database)) as conn:
+            conn.execute('CREATE TABLE working_memory (id, content, source, metadata_json, scope, session_id, superseded_by, valid_until)')
+            conn.execute("INSERT INTO working_memory VALUES ('m', 'solar', 'x', '{\"vault_note\":\"curated/linked.md\"}', 'global', 's', NULL, NULL)")
+            conn.commit()
+        reply = self.service(mnemosyne_db=database, qmd_workspace=workspace,
+                             qmd_command=(sys.executable, str(script))).recall('solar', 8)
+        # The memory row resolves to its canonical note instead of staying a bare msy citation.
+        memory = [r for r in reply['results'] if r['path'] == 'curated/linked.md']
+        self.assertEqual(len(memory), 1)
+        self.assertIn('mnemosyne', {p['backend'] for p in memory[0]['provenance']})
+        self.assertNotIn('canonical_note_status', memory[0])
+        self.assertEqual(reply['resolution'], {'budget': 16, 'resolved': 17})
+
     def test_row_cap_still_applies_to_live_rows(self):
         import sqlite3
         database = self.root / 'memory.sqlite3'

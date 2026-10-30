@@ -85,16 +85,16 @@ unlinked memory hit, so a stale path can never force a foreign read.
 Run from the project root, with the host interpreter for the host test:
 
 ```sh
-python -m unittest discover -s tests -v   # 29 tests, 0 failures
+python -m unittest discover -s tests -v   # 30 tests, 0 failures
 python tools/verify_host.py               # official doctor: 3 tools, 0 hooks
-python tools/verify_bootstrap.py          # clean-venv wheel install: 26 passed, 3 expected skips
+python tools/verify_bootstrap.py          # clean-venv wheel install: 27 passed, 3 expected skips
 ```
 
-- Default suite: **27 pass, 2 optional skips**. The suite includes a real `PluginManager`
+- Default suite: **28 pass, 2 optional skips**. The suite includes a real `PluginManager`
   discovery, scoped dispatch, checkpoint readback and unload in an isolated `HOME`/`HERMES_HOME`
   — no mocked plugin context.
 - `RUN_QMD_INTEGRATION=1 MNEMOSYNE_PYTHON=<interpreter-with-mnemosyne>` against a real QMD
-  binary and a real Mnemosyne database: **29/29, no skips**, all on synthetic data.
+  binary and a real Mnemosyne database: **30/30, no skips**, all on synthetic data.
 - Clean bootstrap builds and installs the wheel in a fresh venv with declared dependencies only.
 
 Both verification scripts stay inside the project and never enable the live profile.

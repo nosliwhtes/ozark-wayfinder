@@ -193,6 +193,7 @@ class Wayfinder:
         # backend hit in the ranking rather than dropping the tail of the list.
         budget = min(limit * 2, 100)
         resolved = 0
+        qmd_resolved = 0
         for row in qmd:
             try:
                 uri = row['file']
@@ -203,8 +204,9 @@ class Wayfinder:
                 if parsed.query not in ('', 'index=wayfinder') or parsed.fragment:
                     raise ValueError('unexpected QMD index or fragment')
                 relative = unquote(parsed.path.removeprefix('/'))
-                if resolved < budget:
+                if qmd_resolved < budget:
                     rows.append(self._canonical(relative, 'qmd', {'backend': 'qmd', 'citation': uri}, terms))
+                    qmd_resolved += 1
                     resolved += 1
                 else:
                     # Unread, but still a real hit with real provenance and its own tier.
@@ -215,12 +217,15 @@ class Wayfinder:
             except (ValueError, TypeError, KeyError, OSError, UnicodeError):
                 qmd_status = {'status': 'degraded', 'code': 'invalid_result'}
         memories, memory_status = mnemosyne_search(self.settings, terms)
+        # Each backend gets its own budget, so a long QMD list cannot starve memory resolution.
+        memory_resolved = 0
         for row in memories:
             canonical = row.pop('canonical_note')
             if canonical:
-                if resolved < budget:
+                if memory_resolved < budget:
                     try:
                         row = self._canonical(canonical, 'mnemosyne', row['provenance'][0], terms)
+                        memory_resolved += 1
                         resolved += 1
                     except (ValueError, TypeError, OSError, UnicodeError):
                         row['canonical_note_status'] = 'invalid_or_missing'
