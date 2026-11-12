@@ -11,12 +11,13 @@ of hidden.
 
 ```
 wayfinder_recall      cited Markdown scan, optionally + QMD BM25 + Mnemosyne evidence
-wayfinder_checkpoint  preview-first, create-only Markdown note with byte readback
+wayfinder_open        bounded revision-checked passage read
+wayfinder_checkpoint  operator-enabled proposal only; human terminal applies
 wayfinder_health      one bounded local probe per component, never a download
 ```
 
 Requires Hermes with the v2 plugin contract, Python >= 3.11 and POSIX filesystem APIs.
-Only Linux/Python 3.14 was exercised here.
+Observed: Linux/Python 3.14 host checks and Ubuntu CI on Python 3.11–3.13. Other platforms are not yet certified.
 
 > **Scope, plainly:** this is a **tool plugin**, not a `memory:` provider replacement.
 > It does not hook turns, inject context, capture conversations, write Mnemosyne, or build
@@ -25,11 +26,11 @@ Only Linux/Python 3.14 was exercised here.
 
 ## Install
 
-Copy the four runtime files into an isolated profile's plugin directory:
+Copy the runtime files into an isolated profile's plugin directory:
 
 ```sh
 mkdir -p "$HERMES_HOME/plugins/ozark-wayfinder"
-cp __init__.py plugin.yaml wayfinder.py backends.py "$HERMES_HOME/plugins/ozark-wayfinder/"
+cp __init__.py plugin.yaml wayfinder.py backends.py checkpoints.py retrieval.py "$HERMES_HOME/plugins/ozark-wayfinder/"
 ```
 
 Enable it and point it at a vault you own:
@@ -39,7 +40,7 @@ hermes plugins enable ozark-wayfinder
 hermes config set plugins.entries.ozark-wayfinder.settings.vault_root /absolute/path/to/vault
 ```
 
-Restart the session owner, then confirm the three tools appear. `vault_root` has no default —
+Restart the session owner, then confirm the four tools appear. `vault_root` has no default —
 Wayfinder never guesses a directory or reads an ambient index.
 
 The wheel is independently installable for library use (`ozark_wayfinder.wayfinder`) but does
@@ -144,15 +145,42 @@ Passage and heading output together are limited to 16,000 UTF-8 bytes; long line
 are rejected rather than silently represented as full lines. Digests identify
 returned bytes, not factual truth. Files may change after a read.
 
-This foundation does **not** introduce privacy allowlists: the explicitly configured
-vault remains the read boundary; tier roots determine ranking, not access. Do not
-put restricted notes in an approved vault. Checkpoint behavior is unchanged and
-`confirm=true` is not human authentication. Do not expose checkpoint to unattended
-callers. Owner-controlled disclosure and authenticated write approval remain
-required work before claiming those protections.
+Owner read roots and exclusions now narrow the explicitly configured vault. Tier roots
+remain ranking, not access. Checkpoints default to disabled, and the model-facing
+tool never writes. See the policy and human-apply contract below.
 
 Run `python tools/evaluate_retrieval.py` for the versioned synthetic benchmark.
 See `tests/evaluation/README.md` for labels, splits, observed baseline and limits.
 QMD quality, semantic retrieval, and a full policy isolation guarantee are not
 established by this scanner benchmark. Existing CI tests Ubuntu Python 3.11–3.13;
 earlier Linux/Python 3.14 manual checks do not establish macOS/Windows support.
+
+## Owner policy and human checkpoint apply
+
+Set `read_roots` to approved vault-relative directory prefixes. Its default `[]`
+means the explicitly configured vault, minus `excluded_roots` (default
+`[restricted, private]`). Exclusions win and hidden paths remain forbidden. These
+settings are operator configuration, never tool arguments. Recall, passage reads,
+and canonical backend hits use the same policy; denied paths never appear in
+results/errors. The policy does not detect secrets or classify arbitrary prose.
+Unlinked Mnemosyne records default to suppressed; `allow_unlinked_records=true`
+is a separate explicit opt-in to their global-record content outside path policy.
+
+`enable_checkpoint=false` by default. Enabling it also requires a unique
+`checkpoint_profile_id` chosen by the operator. The tool returns a 15-minute
+proposal bound to profile, vault identity, destination and exact UTF-8 content.
+It rejects `confirm=true`. Save that proposal as JSON, then a human runs:
+
+```sh
+python tools/apply_checkpoint.py --config /path/to/owner-settings.json proposal.json
+```
+
+The settings JSON contains the same operator settings (including `vault_root`,
+`enable_checkpoint`, `checkpoint_profile_id` and read policy). The terminal shows
+escaped exact content and destination, and requires typing the proposal digest.
+Piped approval and `--yes` are unsupported. Policy, expiry and destination are
+rechecked after review. Publication is atomic/create-only with byte readback;
+on published-but-unverified failure inspect the exact target before retrying.
+A digest is not human authentication and a TTY is not an OS security boundary.
+Do not expose this CLI or owner settings to unattended/model-controlled execution.
+No settings or notes are migrated or enabled automatically by this release.

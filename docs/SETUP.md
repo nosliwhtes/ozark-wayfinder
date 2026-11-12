@@ -7,7 +7,7 @@ The [root README](../README.md) has the full contract. The short version, in a t
 
 ```sh
 mkdir -p "$HERMES_HOME/plugins/ozark-wayfinder"
-cp __init__.py plugin.yaml wayfinder.py backends.py "$HERMES_HOME/plugins/ozark-wayfinder/"
+cp __init__.py plugin.yaml wayfinder.py backends.py checkpoints.py retrieval.py "$HERMES_HOME/plugins/ozark-wayfinder/"
 hermes plugins enable ozark-wayfinder
 hermes config set plugins.entries.ozark-wayfinder.settings.vault_root /absolute/path/to/vault
 ```
@@ -44,7 +44,7 @@ Run against disposable state and synthetic notes only. Require, per point, actua
   `/bin/false`) instead of `ok`.
 - `wayfinder_recall` returns synthetic hits with `path:line` citations and tiers, curated first.
 - A query in a note outside both tier prefixes still returns, between curated and imported.
-- `wayfinder_checkpoint` previews without writing; `confirm=true` writes and reports `verified`;
+- `wayfinder_checkpoint` previews without writing; `confirm=true` is rejected; a human applies the proposal with `tools/apply_checkpoint.py`;
   the same path again returns `target_exists` and leaves the file untouched.
 - Relative traversal (`../`), a hidden directory and a symlinked directory are all refused.
 - With `mnemosyne_db` set to a file that has neither memory table, recall still returns Markdown
@@ -67,8 +67,7 @@ RUN_QMD_INTEGRATION=1 MNEMOSYNE_PYTHON=/path/to/interpreter-with-mnemosyne \
   encryption, migration or rollback.
 - Decide whether notes returned by recall are safe for the model reading the session. They leave
   the machine.
-- Agree who may call `confirm=true`. The flag is a mechanical argument, not a human approval
-  system — a model can set it.
+- Keep checkpoint disabled unless needed. The tool only proposes; a human must review the exact content and destination in the terminal apply command. Never give an unattended agent access to that command or owner configuration.
 - Leave `vault_root` unwritten in a shared config until you have chosen a real directory;
   a missing setting fails closed with `configuration_error`.
 
@@ -94,3 +93,8 @@ Still open:
 - Secret detection before write; session-scoped memory retrieval; vector or graph ranking.
 - Recovery semantics for interrupted checkpoints and concurrent writers.
 - A tested Python/OS matrix beyond Linux/Python 3.14.
+
+Metadata filters accept exact `project`, `status`, `type`, and ISO-date `valid_at`
+values. Metadata is a bounded, non-executing frontmatter subset, not general YAML;
+malformed headers do not satisfy filters. Filters only narrow owner-approved
+sources. Relevance reasons explain lexical matches, not truth or authority.

@@ -14,6 +14,9 @@ class RecallTests(unittest.TestCase):
 
     def service(self, **kw):
         module = importlib.import_module('wayfinder')
+        kw.setdefault('enable_checkpoint', True)
+        kw.setdefault('checkpoint_profile_id', 'test-profile')
+        kw.setdefault('allow_unlinked_records', True)
         return module.Wayfinder(module.Settings(vault_root=self.vault, **kw))
 
     def test_markdown_recall_is_cited_and_curated_first(self):
@@ -59,7 +62,9 @@ class RecallTests(unittest.TestCase):
         plan = service.checkpoint('curated/decision.md', 'Battery decision', 'Choose solar.', confirm=False)
         self.assertEqual(plan['status'], 'preview')
         self.assertFalse((self.vault / 'curated').exists())
-        result = service.checkpoint('curated/decision.md', 'Battery decision', 'Choose solar.', confirm=True)
+        with self.assertRaises(PermissionError):
+            service.checkpoint('curated/decision.md', 'Battery decision', 'Choose solar.', confirm=True)
+        result = service._publish_checkpoint(plan['path'], plan['content'])
         self.assertEqual(result['status'], 'created')
         self.assertTrue(result['verified'])
         text = (self.vault / 'curated/decision.md').read_text()
@@ -825,7 +830,7 @@ class RecallTests(unittest.TestCase):
         from wayfinder import Wayfinder
         with patch.object(Wayfinder, '_read', side_effect=OSError('gone')):
             with self.assertRaises(RuntimeError) as caught:
-                service.checkpoint('a.md', 'Title', 'Summary', confirm=True)
+                service._publish_checkpoint('a.md', '# Title\nSummary\n')
         self.assertIn('may exist', str(caught.exception))
         self.assertIn('readback failed', str(caught.exception))
 
@@ -845,7 +850,7 @@ class RecallTests(unittest.TestCase):
         # Load the plugin the way the loader does: as a package, so relative imports work.
         package = self.root / 'wf_plugin'
         package.mkdir()
-        for name in ('__init__.py', 'wayfinder.py', 'backends.py', 'plugin.yaml'):
+        for name in ('__init__.py', 'wayfinder.py', 'backends.py', 'checkpoints.py', 'retrieval.py', 'plugin.yaml'):
             shutil.copyfile(Path(__file__).resolve().parents[1] / name, package / name)
         sys.path.insert(0, str(self.root))
         self.addCleanup(sys.path.remove, str(self.root))
@@ -861,7 +866,8 @@ class RecallTests(unittest.TestCase):
         with patch.object(plugin_wayfinder.Wayfinder, '_read', return_value='wrong bytes'):
             result = json.loads(plugin._handle(context, 'checkpoint',
                                                {'path': 'a.md', 'title': 'T', 'summary': 'S', 'confirm': True}))
-        self.assertEqual(result['error']['code'], 'verification_failed')
+        self.assertEqual(result['error']['code'], 'capability_denied')
+        self.assertFalse((self.vault / 'a.md').exists())
 
     def test_scan_settings_are_integers_and_small_checkpoint_is_rejected_before_write(self):
         for config in ({'max_files': True}, {'max_file_bytes': 1.5}, {'qmd_timeout': True}):

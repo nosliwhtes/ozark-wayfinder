@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 
 PROJECT = Path(__file__).resolve().parents[1]
-RUNTIME_FILES = ('__init__.py', 'wayfinder.py', 'backends.py', 'plugin.yaml')
+RUNTIME_FILES = ('__init__.py', 'wayfinder.py', 'backends.py', 'checkpoints.py', 'retrieval.py', 'plugin.yaml')
 
 
 def main():

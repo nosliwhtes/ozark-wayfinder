@@ -37,11 +37,11 @@ class HermesIntegrationTests(unittest.TestCase):
             plugin = hermes / 'plugins/ozark-wayfinder'
             plugin.mkdir(parents=True)
             import shutil
-            for name in ('__init__.py', 'wayfinder.py', 'backends.py', 'plugin.yaml'):
+            for name in ('__init__.py', 'wayfinder.py', 'backends.py', 'checkpoints.py', 'retrieval.py', 'plugin.yaml'):
                 shutil.copyfile(PROJECT / name, plugin / name)
             # JSON is a YAML subset; avoids undeclared test-only YAML deps.
             config = {'plugins': {'enabled': ['ozark-wayfinder'], 'entries': {
-                'ozark-wayfinder': {'settings': {'vault_root': str(vault)}}}}}
+                'ozark-wayfinder': {'settings': {'vault_root': str(vault), 'enable_checkpoint': True, 'checkpoint_profile_id': 'test-profile'}}}}}
             (hermes / 'config.yaml').write_text(json.dumps(config))
             env = {'PATH': os.environ.get('PATH', os.defpath), 'HOME': str(home),
                    'HERMES_HOME': str(hermes), 'TMPDIR': str(root),
@@ -71,8 +71,8 @@ preview = json.loads(registry.dispatch('wayfinder_checkpoint', args, scope=manag
 assert preview['status'] == 'preview', preview
 args['confirm'] = True
 created = json.loads(registry.dispatch('wayfinder_checkpoint', args, scope=manager.scope_key))
-assert created['status'] == 'created' and created['verified'], created
-assert 'Synthetic battery choice.' in (home.parent / 'vault/curated/new.md').read_text()
+assert created['error']['code'] == 'capability_denied', created
+assert not (home.parent / 'vault/curated/new.md').exists()
 invalid = json.loads(registry.dispatch('wayfinder_recall', {'query': ''}, scope=manager.scope_key))
 assert invalid['error']['code'] == 'invalid_input', invalid
 manager.unload('ozark-wayfinder')

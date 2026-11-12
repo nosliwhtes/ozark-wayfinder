@@ -26,7 +26,7 @@ def main():
         python = root / 'venv/bin/python'
         staged = root / 'source'
         staged.mkdir()
-        for name in ('__init__.py', 'wayfinder.py', 'backends.py', 'plugin.yaml', 'pyproject.toml'):
+        for name in ('__init__.py', 'wayfinder.py', 'backends.py', 'checkpoints.py', 'retrieval.py', 'plugin.yaml', 'pyproject.toml'):
             shutil.copyfile(PROJECT / name, staged / name)
         subprocess.run([str(python), '-m', 'pip', '--isolated', '--disable-pip-version-check',
                         'install', '--no-cache-dir', str(staged)], cwd=root, env=env, check=True)
