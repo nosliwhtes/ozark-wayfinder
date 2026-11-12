@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "description": "Synthetic v1 baseline, frozen before retrieval changes. Heldout labels are public; do not tune to them.",
+  "restricted_markers": [
+    "NEVER_EMIT_FIXTURE_83b9"
+  ],
+  "queries": [
+    {
+      "id": "identifier-dev",
+      "split": "development",
+      "query": "AX-2049",
+      "relevance": {
+        "curated/atlas.md": 3
+      },
+      "tags": [
+        "exact_identifier"
+      ]
+    },
+    {
+      "id": "alias-dev",
+      "split": "development",
+      "query": "blue lantern",
+      "relevance": {
+        "curated/atlas.md": 3
+      },
+      "tags": [
+        "alias"
+      ]
+    },
+    {
+      "id": "heading-dev",
+      "split": "development",
+      "query": "safe operating range",
+      "relevance": {
+        "curated/orchid.md": 3
+      },
+      "tags": [
+        "heading"
+      ]
+    },
+    {
+      "id": "table-dev",
+      "split": "development",
+      "query": "PCK-771",
+      "relevance": {
+        "curated/packing.md": 3
+      },
+      "tags": [
+        "table",
+        "exact_identifier"
+      ]
+    },
+    {
+      "id": "conflict-dev",
+      "split": "development",
+      "query": "Harbor battery decision",
+      "relevance": {
+        "curated/decision.md": 3,
+        "imports/engineering.md": 2,
+        "imports/operations.md": 2
+      },
+      "tags": [
+        "conflict",
+        "multiple_sources"
+      ]
+    },
+    {
+      "id": "empty-dev",
+      "split": "development",
+      "query": "quasar-zebra-999",
+      "relevance": {},
+      "tags": [
+        "no_answer"
+      ]
+    },
+    {
+      "id": "superseded-dev",
+      "split": "development",
+      "query": "Nova release port",
+      "relevance": {
+        "curated/release.md": 3,
+        "imports/nova-old.md": 1
+      },
+      "tags": [
+        "superseded"
+      ]
+    },
+    {
+      "id": "paraphrase-dev",
+      "split": "development",
+      "query": "how is excess heat removed",
+      "relevance": {
+        "curated/orchid.md": 3
+      },
+      "tags": [
+        "paraphrase"
+      ]
+    },
+    {
+      "id": "identifier-release",
+      "split": "heldout",
+      "query": "PCK-772",
+      "relevance": {
+        "curated/packing.md": 3
+      },
+      "tags": [
+        "exact_identifier",
+        "table"
+      ]
+    },
+    {
+      "id": "phrase-release",
+      "split": "heldout",
+      "query": "Cedar Depot",
+      "relevance": {
+        "curated/atlas.md": 3
+      },
+      "tags": [
+        "phrase"
+      ]
+    },
+    {
+      "id": "ambiguous-release",
+      "split": "heldout",
+      "query": "Mercury",
+      "relevance": {
+        "curated/mercury-planet.md": 2,
+        "curated/mercury-project.md": 2
+      },
+      "tags": [
+        "ambiguous",
+        "multiple_sources"
+      ]
+    },
+    {
+      "id": "paraphrase-release",
+      "split": "heldout",
+      "query": "cold enclosure temperature limits",
+      "relevance": {
+        "curated/orchid.md": 3
+      },
+      "tags": [
+        "paraphrase"
+      ]
+    },
+    {
+      "id": "conflict-release",
+      "split": "heldout",
+      "query": "lithium sodium",
+      "relevance": {
+        "curated/decision.md": 3,
+        "imports/engineering.md": 2,
+        "imports/operations.md": 2
+      },
+      "tags": [
+        "conflict"
+      ]
+    },
+    {
+      "id": "superseded-release",
+      "split": "heldout",
+      "query": "8443",
+      "relevance": {
+        "curated/release.md": 3
+      },
+      "tags": [
+        "superseded",
+        "exact_identifier"
+      ]
+    },
+    {
+      "id": "empty-release",
+      "split": "heldout",
+      "query": "purple submarine warranty",
+      "relevance": {},
+      "tags": [
+        "no_answer"
+      ]
+    },
+    {
+      "id": "restricted-release",
+      "split": "heldout",
+      "query": "NEVER_EMIT_FIXTURE_83b9",
+      "relevance": {},
+      "tags": [
+        "no_answer",
+        "restricted"
+      ]
+    }
+  ]
+}

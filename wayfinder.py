@@ -98,7 +98,7 @@ class Wayfinder:
         finally:
             os.close(fd)
 
-    def _read(self, relative: str) -> str:
+    def _read_bytes(self, relative: str) -> bytes:
         with self._parent_fd(relative) as (parent, name):
             fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
             with os.fdopen(fd, 'rb') as stream:
@@ -108,7 +108,63 @@ class Wayfinder:
                 raw = stream.read(self.settings.max_file_bytes + 1)
                 if len(raw) > self.settings.max_file_bytes:
                     raise ValueError('file exceeds byte limit')
-                return raw.decode('utf-8')
+                after = os.fstat(stream.fileno())
+                if (info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                    raise OSError('source changed during read')
+                return raw
+
+    def _read(self, relative: str) -> str:
+        return self._read_bytes(relative).decode('utf-8')
+
+    def _snapshot(self, relative: str) -> tuple[str, str]:
+        raw = self._read_bytes(relative)
+        return raw.decode('utf-8'), hashlib.sha256(raw).hexdigest()
+
+    def open_passage(self, path: str, start_line: int = 1, line_count: int = 20,
+                     expected_revision: str | None = None) -> dict:
+        """Read bounded current bytes; a changed revision never reuses old line coordinates."""
+        relative_path(path, markdown=True)
+        if type(start_line) is not int or start_line < 1 or type(line_count) is not int or not 1 <= line_count <= 100:
+            raise ValueError('start_line must be positive and line_count must be 1..100')
+        if expected_revision is not None and (not isinstance(expected_revision, str) or
+                not re.fullmatch(r'[0-9a-f]{64}', expected_revision)):
+            raise ValueError('expected_revision must be a SHA-256 digest')
+        result = {'path': path, 'tier': self.tier(path), 'backend': 'markdown'}
+        try:
+            text, revision = self._snapshot(path)
+        except FileNotFoundError:
+            return {**result, 'status': 'missing'}
+        except (OSError, ValueError, UnicodeError):
+            return {**result, 'status': 'unavailable'}
+        result['revision'] = revision
+        if expected_revision is not None and revision != expected_revision:
+            return {**result, 'status': 'stale'}
+        lines = text.splitlines()
+        if not lines:
+            return {**result, 'status': 'empty'}
+        if start_line > len(lines):
+            return {**result, 'status': 'out_of_range'}
+        end = min(len(lines), start_line + line_count - 1)
+        content = '\n'.join(lines[start_line - 1:end])
+        # Do not truncate a line and then claim that the full line was shown.
+        heading, fence = None, None
+        for number, line in enumerate(lines[:start_line], 1):
+            marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line)
+            if fence:
+                if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
+                    fence = None
+                continue
+            if marker:
+                fence = marker[1]
+                continue
+            if re.match(r'^ {0,3}#{1,6}(?:\s|$)', line):
+                heading = {'line': number, 'text': line}
+        if len(content.encode('utf-8')) + len((heading or {}).get('text', '').encode('utf-8')) > 16000:
+            return {**result, 'status': 'passage_too_large'}
+        return {**result, 'status': 'verified', 'content': content, 'heading': heading,
+                'start_line': start_line, 'end_line': end,
+                'citation': f'{path}:{start_line}-{end}',
+                'source_identity': path, 'revision_algorithm': 'sha256'}
 
     def tier(self, relative: str) -> str:
         parts = PurePosixPath(relative).parts
@@ -137,31 +193,33 @@ class Wayfinder:
             room = self.settings.max_files - count
             entries = []
             try:
-                with os.scandir(root) as listing:
+                directory = root.relative_to(self.vault).as_posix()
+                probe = 'placeholder.md' if directory == '.' else directory + '/placeholder.md'
+                with self._parent_fd(probe) as (directory_fd, _), os.scandir(directory_fd) as listing:
                     for entry in listing:
-                        entries.append(entry)
+                        entries.append((entry.name, entry.is_dir(follow_symlinks=False), entry.is_symlink()))
                         if len(entries) > room:
                             break
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 note({'code': 'walk_error', 'detail': type(exc).__name__})
                 continue
             if len(entries) > room:
                 limited = True
                 del entries[room:]
-            entries.sort(key=lambda entry: entry.name)
+            entries.sort(key=lambda entry: entry[0])
             descend = []
-            for entry in entries:
+            for name, is_directory, is_link in entries:
                 count += 1
-                if entry.name.startswith('.'):
+                if name.startswith('.'):
                     continue
-                if entry.is_dir(follow_symlinks=False):
-                    descend.append(Path(entry.path))
+                if is_directory:
+                    descend.append(root / name)
                     continue
-                if not entry.name.endswith('.md') or entry.is_symlink():
+                if not name.endswith('.md') or is_link:
                     continue
-                rel = (Path(root) / entry.name).relative_to(self.vault).as_posix()
+                rel = (Path(root) / name).relative_to(self.vault).as_posix()
                 try:
-                    text = self._read(rel)
+                    text, revision = self._snapshot(rel)
                 except (OSError, ValueError, UnicodeError) as exc:
                     note({'path': rel, 'code': type(exc).__name__})
                     continue
@@ -171,7 +229,7 @@ class Wayfinder:
                     line, snippet = matched[0]
                     citation = f'{rel}:{line}'
                     rows.append({'content': snippet[:800], 'path': rel, 'citation': citation, 'line': line,
-                                 'backend': 'markdown', 'tier': self.tier(rel), 'tier_rule': 'configured_roots',
+                                 'revision': revision, 'source_status': 'opened', 'backend': 'markdown', 'tier': self.tier(rel), 'tier_rule': 'configured_roots',
                                  'score': sum(text.casefold().count(t) for t in terms),
                                  'provenance': [{'backend': 'markdown', 'citation': citation}]})
             stack.extend(reversed(descend))
@@ -190,13 +248,13 @@ class Wayfinder:
 
     def _canonical(self, relative: str, backend: str, provenance: dict, terms: list[str]) -> dict:
         relative_path(relative, markdown=True)
-        text = self._read(relative)
+        text, revision = self._snapshot(relative)
         lines = text.splitlines()
         # An empty note has no line 1, so it is cited by path alone rather than falsely.
         number = next((n for n, line in enumerate(lines, 1) if any(t in line.casefold() for t in terms)), 1 if lines else 0)
         citation = f'{relative}:{number}' if number else relative
         return {'content': lines[number - 1][:800] if number else '', 'path': relative, 'line': number,
-                'citation': citation, 'backend': backend, 'tier': self.tier(relative), 'tier_rule': 'configured_roots',
+                'citation': citation, 'revision': revision, 'source_status': 'opened', 'backend': backend, 'tier': self.tier(relative), 'tier_rule': 'configured_roots',
                 'score': 0, 'provenance': [provenance]}
 
     def recall(self, query: str, limit: int = 8) -> dict:
