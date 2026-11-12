@@ -48,7 +48,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Locked host runtime
         working-directory: .host-runtime
-        run: uv sync --frozen --no-dev --python 3.13
+        run: uv sync --frozen --no-dev --python 3.14
       - name: Real plugin dispatch must execute
         env:
           PYTHONPATH: ${{ github.workspace }}/.host-runtime
