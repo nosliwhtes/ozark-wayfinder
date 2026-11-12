@@ -13,10 +13,10 @@ of hidden.
 wayfinder_recall      cited Markdown scan, optionally + QMD BM25 + Mnemosyne evidence
 wayfinder_open        bounded revision-checked passage read
 wayfinder_checkpoint  operator-enabled proposal only; human terminal applies
-wayfinder_health      one bounded local probe per component, never a download
+wayfinder_health      bounded directory checks; backend coverage/freshness explicitly unknown
 ```
 
-Requires Hermes with the v2 plugin contract, Python >= 3.11 and POSIX filesystem APIs.
+Requires Hermes with the v2 plugin contract and `PluginContext.register_skill` support, Python >= 3.11 and POSIX filesystem APIs.
 Observed: Linux/Python 3.14 host checks and Ubuntu CI on Python 3.11–3.13. Other platforms are not yet certified.
 
 > **Scope, plainly:** this is a **tool plugin**, not a `memory:` provider replacement.
@@ -31,6 +31,7 @@ Copy the runtime files into an isolated profile's plugin directory:
 ```sh
 mkdir -p "$HERMES_HOME/plugins/ozark-wayfinder"
 cp __init__.py plugin.yaml wayfinder.py backends.py checkpoints.py retrieval.py "$HERMES_HOME/plugins/ozark-wayfinder/"
+cp -R skills "$HERMES_HOME/plugins/ozark-wayfinder/"
 ```
 
 Enable it and point it at a vault you own:
@@ -112,9 +113,9 @@ Both verification scripts stay inside the project and never enable the live prof
   does not have.
 - A disabled backend reports `disabled`; an enabled one that fails reports a structured error
   and marks the recall degraded while still returning canonical results. No synthetic success.
-- `checkpoint` previews by default, refuses overwrite, and verifies the persisted bytes.
-- `health` runs one fixed-term probe per enabled component and reports `disabled`, `ok` or a
-  structured error. It does not grade result quality, schema compatibility or index freshness.
+- `checkpoint` only proposes; a separate human-operated apply refuses overwrite and verifies persisted bytes.
+- `health` checks bounded directory availability without invoking backends or reading notes.
+  Configured backend compatibility, coverage and index freshness remain explicitly unknown.
 - No encryption, secret detection, capture, vector/graph recall, indexing, promotion queue,
   edit/forget API, backup, migration, or sandbox. QMD can reach whatever the OS permits.
 
@@ -184,3 +185,10 @@ on published-but-unverified failure inspect the exact target before retrying.
 A digest is not human authentication and a TTY is not an OS security boundary.
 Do not expose this CLI or owner settings to unattended/model-controlled execution.
 No settings or notes are migrated or enabled automatically by this release.
+
+The bundled `ozark-wayfinder:wayfinder` skill is registered while enabled and removed
+on unload. Hosts without `PluginContext.register_skill` are unsupported; registration
+fails rather than silently omitting safety guidance. The wheel includes the skill file
+but does not activate a Hermes plugin by itself.
+
+See [managed adoption](docs/ADOPTION.md) and [measured evaluation](docs/EVALUATION.md).

@@ -20,6 +20,7 @@ def main():
             directory.mkdir()
         for name in RUNTIME_FILES:
             shutil.copyfile(PROJECT / name, source / name)
+        shutil.copytree(PROJECT / 'skills', source / 'skills')
         env = {'PATH': os.environ.get('PATH', os.defpath), 'HOME': str(root / 'home'),
                'HERMES_HOME': str(root / 'hermes'), 'TMPDIR': str(root / 'tmp'),
                'PYTHONDONTWRITEBYTECODE': '1', 'HERMES_ENABLE_PROJECT_PLUGINS': '0'}

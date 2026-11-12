@@ -7,3 +7,6 @@ dist/
 venv/
 .host-check-*/
 .bootstrap-*/
+
+.managed-check-*/
+.host-runtime/

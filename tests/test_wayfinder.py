@@ -111,7 +111,7 @@ class RecallTests(unittest.TestCase):
         self.assertEqual({p['backend'] for p in reply['results'][0]['provenance']}, {'markdown', 'mnemosyne'})
         self.assertEqual(before, sha256(database.read_bytes()).hexdigest())
         self.assertEqual(reply['results'][0]['tier'], 'curated')
-        self.assertEqual(self.service(mnemosyne_db=database).health()['mnemosyne']['status'], 'ok')
+        self.assertEqual(self.service(mnemosyne_db=database).health()['mnemosyne']['status'], 'unknown')
 
     def test_missing_optional_backends_and_bad_schema_degrade_visibly(self):
         import sqlite3
@@ -850,6 +850,7 @@ class RecallTests(unittest.TestCase):
         # Load the plugin the way the loader does: as a package, so relative imports work.
         package = self.root / 'wf_plugin'
         package.mkdir()
+        shutil.copytree(Path(__file__).resolve().parents[1] / 'skills', package / 'skills')
         for name in ('__init__.py', 'wayfinder.py', 'backends.py', 'checkpoints.py', 'retrieval.py', 'plugin.yaml'):
             shutil.copyfile(Path(__file__).resolve().parents[1] / name, package / name)
         sys.path.insert(0, str(self.root))

@@ -1,0 +1,52 @@
+name: optional QMD compatibility
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 9 * * 1'
+  pull_request:
+    paths:
+      - '.github/workflows/optional-qmd.yml'
+      - 'backends.py'
+      - 'wayfinder.py'
+      - 'retrieval.py'
+      - 'tools/evaluate_retrieval.py'
+      - 'tests/evaluation/**'
+      - 'tools/evaluate_qmd.py'
+      - 'tests/test_optional_integration.py'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-bm25:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pinned optional engine
+        run: npm install --global @tobilu/qmd@2.8.3
+      - name: Synthetic adapter integration
+        env:
+          RUN_QMD_INTEGRATION: '1'
+        run: python -m unittest discover -s tests -p test_optional_integration.py -v
+      - name: Synthetic-only BM25 comparison, no model commands
+        run: |
+          python tools/evaluate_qmd.py --qmd "$(command -v qmd)" > qmd-report.json
+          python - <<'PY'
+          import json
+          report = json.load(open('qmd-report.json'))
+          for metrics in report['results'].values():
+              assert metrics['invalid_hydrated_citations'] == 0, metrics
+              assert metrics['restricted_marker_disclosures'] == 0, metrics
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-qmd-report
+          path: qmd-report.json
