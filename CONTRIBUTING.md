@@ -24,7 +24,7 @@ a test that fails without your change — that red run is part of the review.
   was not named in settings.
 - **Notes are untrusted data.** The plugin never executes note text and never fetches a link
   found in one.
-- **`checkpoint` never overwrites and never writes without `confirm=true`.**
+- **The model-facing checkpoint tool never writes. Human apply is operator-enabled, exact-content-bound, and create-only.**
 - **Runtime dependencies stay empty** unless a change genuinely needs one. QMD and Mnemosyne are
   optional and externally managed; do not vendor them.
 - **No personal data.** No real vault paths, no captured note contents in tests or docs, no

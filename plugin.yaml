@@ -22,6 +22,26 @@ config_schema:
   imported_roots:
     type: list
     default: [imports, sources]
+  read_roots:
+    type: list
+    default: []
+    description: Owner allowlist of vault-relative roots. Empty means the explicitly configured vault, minus exclusions.
+  excluded_roots:
+    type: list
+    default: [restricted, private]
+    description: Owner-denied vault-relative roots, applied before emitting any candidate or opening a passage.
+  allow_unlinked_records:
+    type: bool
+    default: false
+    description: Explicit operator opt-in to disclose unlinked global Mnemosyne records, outside Markdown path policy.
+  checkpoint_profile_id:
+    type: str
+    default: ""
+    description: Owner-chosen unique profile identity required for checkpoint proposals and apply, never a tool argument.
+  enable_checkpoint:
+    type: bool
+    default: false
+    description: Enable checkpoint proposals and human-operated apply; never authorizes tool writes.
   max_files:
     type: int
     default: 5000

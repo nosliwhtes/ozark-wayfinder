@@ -11,7 +11,7 @@ Ozark Wayfinder 0.1.0 is a **Hermes directory tool plugin**, not a replacement m
   An unresolved or unreadable record keeps its `canonical_note`, so the caller still sees the path it points at, and each distinct source label survives a merge in `source_labels`.
 
   Resolving a linked hit costs a file read, so resolution is capped at `min(2*limit, 100)` per backend. Where the entry budget truncates a directory listing before it is sorted, which notes fall inside the budget follows filesystem order; the retained set is stable for a given directory state but its membership can differ between machines. The cap bounds read attempts — a slot is spent even if the read then fails — and not the candidate pool: hits past it stay in the result set with their own citation and `canonical_note_status: not_resolved`, so a curated hit cannot be demoted out of ranking by an imported one. An unresolved hit still derives its tier from its target path, and the path is validated on both the read and the skipped branch, so an unread hit cannot smuggle a bad path past the guards. The applied cap and the number actually resolved are reported in `resolution`.
-- `wayfinder_checkpoint(path, title, summary, confirm=false)`: preview by default; explicit `confirm=true` creates a new Markdown note, refuses overwrite, and verifies persisted bytes. No database writes or automatic indexing. Curation follows the explicitly chosen configured directory; there is no automatic promotion. Title is one line of at most 200 characters and the summary is limited to 4,000 characters; the resulting file must also fit `max_file_bytes`. Hidden paths, traversal, and symlink directories are refused. `confirm` is a mechanical tool argument, not an independent human-authorization system.
+- `wayfinder_checkpoint(path, title, summary, confirm=false)`: preview by default; `confirm=true` is rejected; the operator-enabled tool returns an exact-content proposal for human terminal apply, which refuses overwrite and verifies persisted bytes. No database writes or automatic indexing. Curation follows the explicitly chosen configured directory; there is no automatic promotion. Title is one line of at most 200 characters and the summary is limited to 4,000 characters; the resulting file must also fit `max_file_bytes`. Hidden paths, traversal, and symlink directories are refused. `confirm` is a mechanical tool argument, not an independent human-authorization system.
 - `wayfinder_health()`: one bounded probe per component — vault presence, and a single fixed-term query against each enabled backend. It reports `disabled`, `ok` or a structured error, so an enabled-but-broken engine shows up before recall is attempted. It does **not** certify result quality, schema compatibility, or index freshness.
 
 Canonical notes are read as untrusted data. The plugin neither executes note text nor installs backend code. Results remain visible to the caller/model; local storage is not a guarantee that the host model is offline.
@@ -88,3 +88,13 @@ human-authenticated checkpoint apply, metadata/semantic ranking upgrades, eviden
 packs/conflict inference, managed host installation certification, macOS/Windows
 certification, and the later workbench/differentiators. These are separate release
 milestones, not claims made by this foundation. No live profile or vault changed.
+
+## Owner-policy and checkpoint increment
+
+Implemented after the evidence foundation: shared operator `read_roots` and
+`excluded_roots` checks, default restricted/private denial, unlinked-record opt-in,
+fail-closed checkpoint enablement, profile/vault/content-bound expiring proposals,
+and a separate human terminal apply command. Model `confirm=true` never writes.
+This supersedes earlier checkpoint/disclosure roadmap descriptions above.
+The threat boundary is model tool invocation, not hostile code with the user's OS
+permissions. Profile identity is operator configured, not inferred from model text.
