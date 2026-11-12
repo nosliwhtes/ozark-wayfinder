@@ -294,10 +294,75 @@ class Wayfinder:
         return rows, status
 
     def health(self) -> dict:
-        _, memory = mnemosyne_search(self.settings, ['wayfinder_health_probe'])
-        _, qmd = qmd_search(self.settings, 'wayfinder_health_probe')
-        return {'markdown': {'status': 'ok' if self.vault.is_dir() else 'error', 'mode': 'bounded_literal'},
-                'qmd': qmd, 'mnemosyne': memory}
+        """Inspect bounded directory availability, never run backends or index notes.
+
+        Availability is a point-in-time descriptor check, not completeness, schema
+        compatibility, freshness of an index, or permission to disclose every note.
+        """
+        budget = 64
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        scope = dict(checked=0, available=0, unavailable=0, excluded=0, unchecked=0)
+        markdown = {'status': 'ok', 'mode': 'bounded_lexical', 'availability': 'checked',
+                    'coverage': 'unknown', 'freshness': 'read_at_retrieval',
+                    'scope_roots': scope}
+        root_fd = None
+        try:
+            root_fd = os.open(self.vault, flags)
+            for index, relative in enumerate(self.settings.read_roots):
+                if index >= budget:
+                    scope['unchecked'] += len(self.settings.read_roots) - index
+                    break
+                if not self.permitted(relative):
+                    scope['excluded'] += 1
+                    continue
+                parts = relative_path(relative).parts
+                if len(parts) > budget:
+                    scope['unchecked'] += 1
+                    continue
+                scope['checked'] += 1
+                fd = None
+                try:
+                    fd = os.dup(root_fd)
+                    for part in parts:
+                        child = os.open(part, flags, dir_fd=fd)
+                        os.close(fd)
+                        fd = child
+                    scope['available'] += 1
+                except OSError:
+                    scope['unavailable'] += 1
+                finally:
+                    if fd is not None:
+                        os.close(fd)
+            if scope['unavailable'] or scope['unchecked']:
+                markdown.update(status='degraded', code='scope_not_fully_available')
+        except OSError:
+            markdown.update(status='error', code='root_unavailable')
+            scope['unchecked'] = len(self.settings.read_roots)
+        finally:
+            if root_fd is not None:
+                os.close(root_fd)
+
+        def backend(configured):
+            return {'status': 'unknown' if configured else 'disabled',
+                    'configured': configured, 'compatibility': 'not_checked',
+                    'availability': 'not_checked', 'coverage': 'unknown',
+                    'index_freshness': 'unknown'}
+
+        return {'markdown': markdown,
+                'qmd': backend(self.settings.qmd_workspace is not None),
+                'mnemosyne': backend(self.settings.mnemosyne_db is not None),
+                'policy': {'read_scope': 'explicit_roots' if self.settings.read_roots else 'vault',
+                           'read_root_count': len(self.settings.read_roots),
+                           'excluded_root_count': len(self.settings.excluded_roots),
+                           'exclusions_take_precedence': True,
+                           'allow_unlinked_records': self.settings.allow_unlinked_records},
+                'capabilities': {'recall': True, 'open_passage': True,
+                                 'checkpoint_proposal': self.settings.enable_checkpoint and bool(self.settings.checkpoint_profile_id.strip()),
+                                 'tool_checkpoint_apply': False},
+                'limits': {'max_files': self.settings.max_files,
+                           'max_file_bytes': self.settings.max_file_bytes,
+                           'health_root_checks': budget, 'health_root_depth': budget,
+                           'qmd_timeout_seconds': self.settings.qmd_timeout}}
 
     def _canonical(self, relative: str, backend: str, provenance: dict, terms: list[str], query: str) -> dict:
         relative_path(relative, markdown=True)

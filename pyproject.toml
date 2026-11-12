@@ -15,4 +15,4 @@ packages = ["ozark_wayfinder"]
 package-dir = {ozark_wayfinder = "."}
 
 [tool.setuptools.package-data]
-ozark_wayfinder = ["plugin.yaml"]
+ozark_wayfinder = ["plugin.yaml", "skills/wayfinder/SKILL.md"]

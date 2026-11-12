@@ -10,10 +10,11 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +22,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Byte-compile
-        run: python -m compileall -q __init__.py wayfinder.py backends.py
+        run: python -m compileall -q __init__.py wayfinder.py backends.py checkpoints.py retrieval.py
       - name: Unit suite (no host, no optional engines)
         run: python -m unittest discover -s tests -v
       - name: Synthetic retrieval safety and quality report
@@ -30,7 +31,33 @@ jobs:
         run: python tools/verify_bootstrap.py
       - name: No host-specific absolute paths in shipped code
         run: |
-          if grep -rn '/home/' __init__.py wayfinder.py backends.py plugin.yaml; then
+          if grep -rn '/home/' __init__.py wayfinder.py backends.py checkpoints.py retrieval.py plugin.yaml; then
             echo '::error::host-specific path in shipped code'
             exit 1
           fi
+
+  pinned-hermes-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19
+          path: .host-runtime
+      - uses: astral-sh/setup-uv@v6
+      - name: Locked host runtime
+        working-directory: .host-runtime
+        run: uv sync --frozen --no-dev --python 3.13
+      - name: Real plugin dispatch must execute
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.host-runtime
+        run: |
+          .host-runtime/.venv/bin/python -c 'import hermes_cli'
+          .host-runtime/.venv/bin/python -m unittest discover -s tests -p test_plugin.py -v
+      - name: Isolated host doctor
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.host-runtime
+        run: |
+          export PATH="$PWD/.host-runtime/.venv/bin:$PATH"
+          .host-runtime/.venv/bin/python tools/verify_host.py

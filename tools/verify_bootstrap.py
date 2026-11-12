@@ -28,12 +28,14 @@ def main():
         staged.mkdir()
         for name in ('__init__.py', 'wayfinder.py', 'backends.py', 'checkpoints.py', 'retrieval.py', 'plugin.yaml', 'pyproject.toml'):
             shutil.copyfile(PROJECT / name, staged / name)
+        shutil.copytree(PROJECT / 'skills', staged / 'skills')
         subprocess.run([str(python), '-m', 'pip', '--isolated', '--disable-pip-version-check',
                         'install', '--no-cache-dir', str(staged)], cwd=root, env=env, check=True)
         script = '''
 from pathlib import Path
 import importlib.util, sys, unittest
 import ozark_wayfinder
+assert (Path(ozark_wayfinder.__file__).parent / 'skills/wayfinder/SKILL.md').is_file(), 'wheel must ship skill'
 from ozark_wayfinder.wayfinder import Settings, Wayfinder
 assert importlib.util.find_spec('hermes_cli') is None, 'must not leak host Hermes into bootstrap'
 assert importlib.util.find_spec('mnemosyne') is None, 'must not leak host Mnemosyne into bootstrap'

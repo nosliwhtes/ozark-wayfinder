@@ -8,6 +8,7 @@ The [root README](../README.md) has the full contract. The short version, in a t
 ```sh
 mkdir -p "$HERMES_HOME/plugins/ozark-wayfinder"
 cp __init__.py plugin.yaml wayfinder.py backends.py checkpoints.py retrieval.py "$HERMES_HOME/plugins/ozark-wayfinder/"
+cp -R skills "$HERMES_HOME/plugins/ozark-wayfinder/"
 hermes plugins enable ozark-wayfinder
 hermes config set plugins.entries.ozark-wayfinder.settings.vault_root /absolute/path/to/vault
 ```
@@ -16,7 +17,7 @@ There is no entry point and no installer. The wheel exists for library use only.
 
 ## Prerequisites
 
-1. **Host:** a Hermes build with the v2 plugin contract, Python >= 3.11, POSIX filesystem APIs. Only Linux/Python 3.14 was exercised; certify your own combination before trusting it.
+1. **Host:** a Hermes build with the v2 plugin contract and `PluginContext.register_skill` support, Python >= 3.11, POSIX filesystem APIs. Only Linux/Python 3.14 was exercised; certify your own combination before trusting it.
 2. **Vault:** an existing absolute directory you own, laid out so curated and imported material are separable by prefix. Nothing is discovered for you.
 3. **Dependencies:** none for the plugin itself. QMD and Mnemosyne are optional and stay separately managed — the plugin never installs, updates or imports either.
 4. **Storage:** write access to the vault (for `checkpoint`), read access to the Mnemosyne file if you enable it, and write access to the QMD workspace if you enable that — the adapter puts its child's temp output there. Keep runtime state out of the source tree.
@@ -98,3 +99,8 @@ Metadata filters accept exact `project`, `status`, `type`, and ISO-date `valid_a
 values. Metadata is a bounded, non-executing frontmatter subset, not general YAML;
 malformed headers do not satisfy filters. Filters only narrow owner-approved
 sources. Relevance reasons explain lexical matches, not truth or authority.
+
+The bundled `ozark-wayfinder:wayfinder` skill is registered while enabled and removed
+on unload. Hosts without `PluginContext.register_skill` are unsupported; registration
+fails rather than silently omitting safety guidance. The wheel includes the skill file
+but does not activate a Hermes plugin by itself.

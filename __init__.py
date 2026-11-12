@@ -52,6 +52,11 @@ def _handle(ctx, operation, args):
 
 
 def register(ctx):
+    ctx.register_skill(
+        name='wayfinder',
+        path=Path(__file__).resolve().parent / 'skills' / 'wayfinder' / 'SKILL.md',
+        description='Recall cited local evidence, open revision-checked passages, and propose human-reviewed checkpoints.',
+    )
     specifications = (
         ('recall', 'Recall canonical Markdown with optional isolated local QMD and read-only Mnemosyne evidence. Imported material stays imported.',
          {'query': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
@@ -66,7 +71,7 @@ def register(ctx):
          {'path': {'type': 'string', 'description': 'Vault-relative new .md path; tier comes from configured roots.'},
           'title': {'type': 'string', 'maxLength': 200}, 'summary': {'type': 'string', 'maxLength': 4000},
           'confirm': {'type': 'boolean', 'default': False}}, ['path', 'title', 'summary']),
-        ('health', 'Probe configured backends locally and report disabled, degraded or error states without downloading models.', {}, []),
+        ('health', 'Inspect bounded vault directory availability and report backend configuration without running backends, indexing notes, or downloading models.', {}, []),
     )
     for operation, description, properties, required in specifications:
         name = 'wayfinder_' + operation
