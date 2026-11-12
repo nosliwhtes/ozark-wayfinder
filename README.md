@@ -131,3 +131,28 @@ model reads it. See [docs/PRIVACY.md](docs/PRIVACY.md).
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Evidence opening and evaluation (0.2 foundation)
+
+`wayfinder_recall` now includes a SHA-256 `revision` for each opened canonical
+source. Use `wayfinder_open` with `path`, `start_line`, `line_count` (1–100), and
+that `expected_revision` to hydrate evidence. It returns exact current line ranges,
+nearest preceding ATX heading, tier, and digest from the same bounded byte read.
+A changed revision returns `stale` without reusing old line numbers; missing,
+unavailable, empty, out-of-range, and oversized passages are distinct statuses.
+Passage and heading output together are limited to 16,000 UTF-8 bytes; long lines
+are rejected rather than silently represented as full lines. Digests identify
+returned bytes, not factual truth. Files may change after a read.
+
+This foundation does **not** introduce privacy allowlists: the explicitly configured
+vault remains the read boundary; tier roots determine ranking, not access. Do not
+put restricted notes in an approved vault. Checkpoint behavior is unchanged and
+`confirm=true` is not human authentication. Do not expose checkpoint to unattended
+callers. Owner-controlled disclosure and authenticated write approval remain
+required work before claiming those protections.
+
+Run `python tools/evaluate_retrieval.py` for the versioned synthetic benchmark.
+See `tests/evaluation/README.md` for labels, splits, observed baseline and limits.
+QMD quality, semantic retrieval, and a full policy isolation guarantee are not
+established by this scanner benchmark. Existing CI tests Ubuntu Python 3.11–3.13;
+earlier Linux/Python 3.14 manual checks do not establish macOS/Windows support.

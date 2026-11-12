@@ -73,3 +73,18 @@ One initial doctor invocation placed TMPDIR below the directory doctor recursive
 ## Explicit gaps and non-goals
 
 No automatic capture, context injection, `memory` provider registration, prefetch, session/compression hooks, memory synchronization, Mnemosyne writes, semantic/vector/graph recall, QMD indexing, reviewed ingest/promotion queue, secret detector, forget/edit/delete API, encryption, backup/restore, migration, publication, scheduling, or network sandbox. There is no proof of crash/power-loss durability, hostile concurrent directory-renaming resistance, full multi-profile concurrency isolation, or exhaustive Mnemosyne schema/version compatibility. No user data migration, live activation, commit, or publication was performed.
+
+## November 12 evidence foundation
+
+Implemented: canonical recall revision digests; `wayfinder_open` verified passage
+hydration, explicit stale/missing/unavailable/empty/range/size outcomes, exact line
+ranges and ATX heading context; stable pre/post-read file metadata checks; nofollow
+descriptor-based scan enumeration to avoid following swapped directory symlinks.
+Added synthetic versioned retrieval evaluation with dev/heldout cases and actual
+scanner baseline, plus unit tests. Optional backend provenance remains preserved.
+
+Scope not yet implemented: owner allowlists/exclusions and backend disclosure gate,
+human-authenticated checkpoint apply, metadata/semantic ranking upgrades, evidence
+packs/conflict inference, managed host installation certification, macOS/Windows
+certification, and the later workbench/differentiators. These are separate release
+milestones, not claims made by this foundation. No live profile or vault changed.

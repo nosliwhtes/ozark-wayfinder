@@ -443,7 +443,7 @@ class RecallTests(unittest.TestCase):
                                                 is_symlink=lambda: False)
 
         def fake_scandir(path):
-            return FakeScandir() if str(path) == real_vault else os.scandir(path)
+            return FakeScandir()
 
         with patch.object(wayfinder.os, 'scandir', fake_scandir):
             reply = self.service(max_files=4).recall('solar')

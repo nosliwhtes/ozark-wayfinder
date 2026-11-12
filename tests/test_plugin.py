@@ -59,9 +59,11 @@ manager = PluginManager()
 manager.discover_and_load()
 loaded = manager._plugins['ozark-wayfinder']
 assert loaded.enabled, loaded.error
-assert {n for n in manager._plugin_tool_names if n.startswith('wayfinder_')} == {'wayfinder_recall', 'wayfinder_health', 'wayfinder_checkpoint'}, manager._plugin_tool_names
+assert {n for n in manager._plugin_tool_names if n.startswith('wayfinder_')} == {'wayfinder_recall', 'wayfinder_health', 'wayfinder_checkpoint', 'wayfinder_open'}, manager._plugin_tool_names
 recall = json.loads(registry.dispatch('wayfinder_recall', {'query': 'solar'}, scope=manager.scope_key, session_id='synthetic'))
 assert recall['results'][0]['citation'] == 'curated/fixture.md:1', recall
+opened = json.loads(registry.dispatch('wayfinder_open', {'path': 'curated/fixture.md', 'expected_revision': recall['results'][0]['revision']}, scope=manager.scope_key))
+assert opened['status'] == 'verified' and opened['start_line'] == 1, opened
 health = json.loads(registry.dispatch('wayfinder_health', {}, scope=manager.scope_key))
 assert health['mnemosyne']['status'] == 'disabled', health
 args = {'path': 'curated/new.md', 'title': 'Synthetic checkpoint', 'summary': 'Synthetic battery choice.'}
@@ -75,7 +77,7 @@ invalid = json.loads(registry.dispatch('wayfinder_recall', {'query': ''}, scope=
 assert invalid['error']['code'] == 'invalid_input', invalid
 manager.unload('ozark-wayfinder')
 assert registry.get_entry('wayfinder_recall', scope=manager.scope_key) is None
-print(json.dumps({'discovery': 'ok', 'tools': 3, 'dispatch': 'ok', 'checkpoint_readback': 'ok', 'unload': 'ok'}))
+print(json.dumps({'discovery': 'ok', 'tools': 4, 'dispatch': 'ok', 'checkpoint_readback': 'ok', 'unload': 'ok'}))
 '''
             run = subprocess.run([sys.executable, '-c', code], env=env, cwd=root,
                                  capture_output=True, text=True, timeout=90)

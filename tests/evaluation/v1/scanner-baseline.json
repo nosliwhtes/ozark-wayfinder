@@ -1,0 +1,458 @@
+{
+  "fixture_version": 1,
+  "engine": "dependency-free Markdown scanner",
+  "optional_backends": "disabled; QMD BM25/hybrid not measured",
+  "split": "all",
+  "machine": {
+    "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "python": "3.12.14",
+    "processor": "unknown"
+  },
+  "corpus": {
+    "documents": 11,
+    "bytes": 1198,
+    "sha256": "4d57b50ba727e98af97690509b6a340d5eb235a0f855a5e1d6838811f6a24598"
+  },
+  "metrics": {
+    "recall_at_5": 0.9230769230769231,
+    "ndcg_at_5": 0.8779629835369333,
+    "citation_validity": 1.0,
+    "invalid_citations": 0,
+    "no_answer_false_positive_rate": 0.0,
+    "restricted_marker_disclosures": 0,
+    "latency_ms": {
+      "p50": 1.0498289998395194,
+      "p95": 1.4924430001883593,
+      "max": 1.5604149998580397
+    }
+  },
+  "queries": [
+    {
+      "id": "identifier-dev",
+      "split": "development",
+      "tags": [
+        "exact_identifier"
+      ],
+      "query": "AX-2049",
+      "expected_sources": {
+        "curated/atlas.md": 3
+      },
+      "returned_sources": [
+        "curated/atlas.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "citations": 1,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        1.2574229999700037,
+        1.1476589997982956,
+        0.8115990003716433
+      ]
+    },
+    {
+      "id": "alias-dev",
+      "split": "development",
+      "tags": [
+        "alias"
+      ],
+      "query": "blue lantern",
+      "expected_sources": {
+        "curated/atlas.md": 3
+      },
+      "returned_sources": [
+        "curated/atlas.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "citations": 1,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        1.1197180001545348,
+        0.7376379999186611,
+        1.0355829999753041
+      ]
+    },
+    {
+      "id": "heading-dev",
+      "split": "development",
+      "tags": [
+        "heading"
+      ],
+      "query": "safe operating range",
+      "expected_sources": {
+        "curated/orchid.md": 3
+      },
+      "returned_sources": [
+        "curated/orchid.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "citations": 1,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        1.1877490001097613,
+        1.0583769999357173,
+        0.9430139998585219
+      ]
+    },
+    {
+      "id": "table-dev",
+      "split": "development",
+      "tags": [
+        "table",
+        "exact_identifier"
+      ],
+      "query": "PCK-771",
+      "expected_sources": {
+        "curated/packing.md": 3
+      },
+      "returned_sources": [
+        "curated/packing.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "citations": 1,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        1.2922249998155166,
+        1.227859000209719,
+        1.1907839998457348
+      ]
+    },
+    {
+      "id": "conflict-dev",
+      "split": "development",
+      "tags": [
+        "conflict",
+        "multiple_sources"
+      ],
+      "query": "Harbor battery decision",
+      "expected_sources": {
+        "curated/decision.md": 3,
+        "imports/engineering.md": 2,
+        "imports/operations.md": 2
+      },
+      "returned_sources": [
+        "curated/decision.md",
+        "imports/engineering.md",
+        "imports/operations.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "citations": 3,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        1.1344200001985882,
+        1.1656659999061958,
+        1.1075299998992705
+      ]
+    },
+    {
+      "id": "empty-dev",
+      "split": "development",
+      "tags": [
+        "no_answer"
+      ],
+      "query": "quasar-zebra-999",
+      "expected_sources": {},
+      "returned_sources": [],
+      "recall_at_5": null,
+      "ndcg_at_5": null,
+      "citations": 0,
+      "invalid_citations": 0,
+      "no_answer_false_positive": false,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        1.1826219997601584,
+        1.227638999807823,
+        1.108641999962856
+      ]
+    },
+    {
+      "id": "superseded-dev",
+      "split": "development",
+      "tags": [
+        "superseded"
+      ],
+      "query": "Nova release port",
+      "expected_sources": {
+        "curated/release.md": 3,
+        "imports/nova-old.md": 1
+      },
+      "returned_sources": [
+        "curated/release.md",
+        "curated/decision.md",
+        "imports/nova-old.md",
+        "imports/engineering.md",
+        "imports/operations.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 0.9828422279067397,
+      "citations": 5,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        1.1363829999027075,
+        1.2967220000064117,
+        1.51813200000106
+      ]
+    },
+    {
+      "id": "paraphrase-dev",
+      "split": "development",
+      "tags": [
+        "paraphrase"
+      ],
+      "query": "how is excess heat removed",
+      "expected_sources": {
+        "curated/orchid.md": 3
+      },
+      "returned_sources": [
+        "curated/decision.md",
+        "curated/atlas.md",
+        "curated/mercury-planet.md",
+        "curated/orchid.md",
+        "curated/release.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 0.43067655807339306,
+      "citations": 5,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        1.2733869998555747,
+        1.220446999923297,
+        0.8986190000541683
+      ]
+    },
+    {
+      "id": "identifier-release",
+      "split": "heldout",
+      "tags": [
+        "exact_identifier",
+        "table"
+      ],
+      "query": "PCK-772",
+      "expected_sources": {
+        "curated/packing.md": 3
+      },
+      "returned_sources": [
+        "curated/packing.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "citations": 1,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        0.8903959997041966,
+        0.9582069997122744,
+        0.8006429998204112
+      ]
+    },
+    {
+      "id": "phrase-release",
+      "split": "heldout",
+      "tags": [
+        "phrase"
+      ],
+      "query": "Cedar Depot",
+      "expected_sources": {
+        "curated/atlas.md": 3
+      },
+      "returned_sources": [
+        "curated/atlas.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "citations": 1,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        0.7341929999711283,
+        1.1748199999601638,
+        0.870555999881617
+      ]
+    },
+    {
+      "id": "ambiguous-release",
+      "split": "heldout",
+      "tags": [
+        "ambiguous",
+        "multiple_sources"
+      ],
+      "query": "Mercury",
+      "expected_sources": {
+        "curated/mercury-planet.md": 2,
+        "curated/mercury-project.md": 2
+      },
+      "returned_sources": [
+        "curated/mercury-planet.md",
+        "curated/mercury-project.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "citations": 2,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        0.8497550002175558,
+        1.4924430001883593,
+        1.004856999770709
+      ]
+    },
+    {
+      "id": "paraphrase-release",
+      "split": "heldout",
+      "tags": [
+        "paraphrase"
+      ],
+      "query": "cold enclosure temperature limits",
+      "expected_sources": {
+        "curated/orchid.md": 3
+      },
+      "returned_sources": [],
+      "recall_at_5": 0.0,
+      "ndcg_at_5": 0.0,
+      "citations": 0,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        0.7348550002461707,
+        0.7093670001268038,
+        0.8191609999812499
+      ]
+    },
+    {
+      "id": "conflict-release",
+      "split": "heldout",
+      "tags": [
+        "conflict"
+      ],
+      "query": "lithium sodium",
+      "expected_sources": {
+        "curated/decision.md": 3,
+        "imports/engineering.md": 2,
+        "imports/operations.md": 2
+      },
+      "returned_sources": [
+        "curated/decision.md",
+        "imports/engineering.md",
+        "imports/operations.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "citations": 3,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        0.9040070003720757,
+        0.7876630002101592,
+        0.7311189997381007
+      ]
+    },
+    {
+      "id": "superseded-release",
+      "split": "heldout",
+      "tags": [
+        "superseded",
+        "exact_identifier"
+      ],
+      "query": "8443",
+      "expected_sources": {
+        "curated/release.md": 3
+      },
+      "returned_sources": [
+        "curated/release.md"
+      ],
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "citations": 1,
+      "invalid_citations": 0,
+      "no_answer_false_positive": null,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        0.8737409998502699,
+        0.7099570002537803,
+        0.6614150001951202
+      ]
+    },
+    {
+      "id": "empty-release",
+      "split": "heldout",
+      "tags": [
+        "no_answer"
+      ],
+      "query": "purple submarine warranty",
+      "expected_sources": {},
+      "returned_sources": [],
+      "recall_at_5": null,
+      "ndcg_at_5": null,
+      "citations": 0,
+      "invalid_citations": 0,
+      "no_answer_false_positive": false,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        1.5604149998580397,
+        1.1828819997390383,
+        1.0412809997433214
+      ]
+    },
+    {
+      "id": "restricted-release",
+      "split": "heldout",
+      "tags": [
+        "no_answer",
+        "restricted"
+      ],
+      "query": "NEVER_EMIT_FIXTURE_83b9",
+      "expected_sources": {},
+      "returned_sources": [],
+      "recall_at_5": null,
+      "ndcg_at_5": null,
+      "citations": 0,
+      "invalid_citations": 0,
+      "no_answer_false_positive": false,
+      "restricted_marker_disclosed": false,
+      "degraded": false,
+      "latency_ms": [
+        1.4077069999984815,
+        0.76667199982694,
+        0.6811940002080519
+      ]
+    }
+  ]
+}
